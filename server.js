@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const GECKO_API_KEY = 'pk_live_WA8Am7Nhkxo53FDosrtrW2_B9GbM3w6A';
+const GECKO_API_KEY = 'pk_live_-N166qQYpBhtxDPPlLz8Uqd6zvlRKh7T';
 
 // Inicializa o Firebase Admin (Seguro, sem travar o servidor se não achar credenciais)
 try {
