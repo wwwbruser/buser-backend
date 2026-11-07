@@ -8,19 +8,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const GECKO_API_KEY = 'pk_live_-N166qQYpBhtxDPPlLz8Uqd6zvlRKh7T';
+const GECKO_API_KEY = 'pk_live_WA8Am7Nhkxo53FDosrtrW2_B9GbM3w6A'; 
 
-// Inicializa o Firebase Admin (Seguro, sem travar o servidor se não achar credenciais)
 try {
-  admin.initializeApp({
-    projectId: 'buser202872a' // Nome do seu projeto novo
-  });
-} catch (e) {
-  console.log("Aviso: Firebase Admin já inicializado ou com erro.", e.message);
-}
+  admin.initializeApp({ projectId: 'buser202872a' });
+} catch (e) {}
 const db = admin.firestore();
 
-// Rota de Busca de Viagens
+// ROTA DE BUSCA CORRIGIDA
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
   console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
@@ -36,7 +31,7 @@ app.get('/api/clickbus/search', async (req, res) => {
       originCity: origemParts[0],
       originState: origemParts[1] || 'SP',
       destinationCity: destinoParts[0],
-      destinationState: destinoParts[1] || 'RJ',
+      destinationState: destinoParts[1] || 'SP',
       departureDate: data
     };
 
@@ -44,18 +39,19 @@ app.get('/api/clickbus/search', async (req, res) => {
       headers: { 'Authorization': `Bearer ${GECKO_API_KEY}`, 'Content-Type': 'application/json' }
     });
     
-    // Se a GeckoAPI não retornar dados, manda lista vazia
-    if (!response.data || !response.data.data) {
-       console.log("GeckoAPI retornou vazio.");
-       return res.json([]); 
+    // AQUI ESTÁ A MÁGICA: Pega a lista que está dentro de "results"
+    let viagens = [];
+    if (response.data && response.data.results) {
+      viagens = response.data.results;
+    } else if (Array.isArray(response.data)) {
+      viagens = response.data;
     }
-    
-    console.log(`SUCESSO! ${response.data.data.length} viagens encontradas.`);
-    res.json(response.data.data);
+
+    console.log(`SUCESSO! ${viagens.length} viagens encontradas.`);
+    res.json(viagens); // Manda a lista certinha pro site
     
   } catch (error) {
-    console.error("Erro na GeckoAPI:", error.response ? error.response.data : error.message);
-    // Se der erro, devolve lista vazia para o site não travar
+    console.error("Erro Gecko:", error.response ? error.response.data : error.message);
     res.json([]); 
   }
 });
@@ -65,7 +61,6 @@ app.post('/api/pix', async (req, res) => {
   const { amount, customer } = req.body;
 
   try {
-    // 1. Vai no Firebase e pega a chave que você salvou no painel
     const doc = await db.collection('config').doc('global').get();
     const blackcatKey = doc.exists ? doc.data().blackcatKey : null;
 
@@ -73,7 +68,6 @@ app.post('/api/pix', async (req, res) => {
       return res.status(400).json({ error: 'Chave da BlackCat não configurada no painel.' });
     }
 
-    // 2. Gera a cobrança na BlackCat
     const response = await axios.post('https://api.blackcatoficial.com/api/sales/create-sale', {
       amount: amount,
       paymentMethod: 'PIX',
