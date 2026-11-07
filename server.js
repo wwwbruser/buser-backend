@@ -8,18 +8,23 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Chave da Gecko para buscar as passagens
 const GECKO_API_KEY = 'pk_live_WA8Am7Nhkxo53FDosrtrW2_B9GbM3w6A';
 
-// Inicializa o Firebase Admin (para ler a chave do painel e o desconto)
-admin.initializeApp({
-  projectId: 'projeto-link-ddbf0'
-});
+// Inicializa o Firebase Admin (Seguro, sem travar o servidor se não achar credenciais)
+try {
+  admin.initializeApp({
+    projectId: 'buser202872a' // Nome do seu projeto novo
+  });
+} catch (e) {
+  console.log("Aviso: Firebase Admin já inicializado ou com erro.", e.message);
+}
 const db = admin.firestore();
 
-// Rota de Busca de Viagens (GeckoAPI -> ClickBus)
+// Rota de Busca de Viagens
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
+  console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
+
   try {
     const origemParts = origem.split(',').map(s => s.trim());
     const destinoParts = destino.split(',').map(s => s.trim());
@@ -38,9 +43,20 @@ app.get('/api/clickbus/search', async (req, res) => {
     const response = await axios.post('https://api.geckoapi.com.br/v1/extract', payload, {
       headers: { 'Authorization': `Bearer ${GECKO_API_KEY}`, 'Content-Type': 'application/json' }
     });
-    res.json(response.data);
+    
+    // Se a GeckoAPI não retornar dados, manda lista vazia
+    if (!response.data || !response.data.data) {
+       console.log("GeckoAPI retornou vazio.");
+       return res.json([]); 
+    }
+    
+    console.log(`SUCESSO! ${response.data.data.length} viagens encontradas.`);
+    res.json(response.data.data);
+    
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao buscar viagens' });
+    console.error("Erro na GeckoAPI:", error.response ? error.response.data : error.message);
+    // Se der erro, devolve lista vazia para o site não travar
+    res.json([]); 
   }
 });
 
