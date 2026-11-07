@@ -10,6 +10,7 @@ app.use(express.json());
 const GECKO_API_KEY = process.env.GECKO_API_KEY; 
 const BLACKCAT_API_KEY = process.env.BLACKCAT_API_KEY; 
 
+// ROTA DE BUSCA
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
   console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
@@ -43,6 +44,7 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 });
 
+// ROTA DO PIX
 app.post('/api/pix', async (req, res) => {
   const { amount, customer } = req.body;
 
