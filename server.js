@@ -4,7 +4,14 @@ const axios = require('axios');
 const admin = require('firebase-admin');
 
 const app = express();
-app.use(cors());
+
+// AQUI ESTÁ A CORREÇÃO DO CORS PARA O SITE CONSEGUIR LER
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 app.use(express.static(__dirname));
 
@@ -15,7 +22,7 @@ try {
 } catch (e) {}
 const db = admin.firestore();
 
-// ROTA DE BUSCA CORRIGIDA
+// ROTA DE BUSCA (Puxando GeckoAPI e formatando certinho)
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
   console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
@@ -39,7 +46,7 @@ app.get('/api/clickbus/search', async (req, res) => {
       headers: { 'Authorization': `Bearer ${GECKO_API_KEY}`, 'Content-Type': 'application/json' }
     });
     
-    // AQUI ESTÁ A MÁGICA: Pega a lista que está dentro de "results"
+    // Pega a lista de viagens que vem dentro de "results"
     let viagens = [];
     if (response.data && response.data.results) {
       viagens = response.data.results;
@@ -48,15 +55,15 @@ app.get('/api/clickbus/search', async (req, res) => {
     }
 
     console.log(`SUCESSO! ${viagens.length} viagens encontradas.`);
-    res.json(viagens); // Manda a lista certinha pro site
+    res.json(viagens); 
     
   } catch (error) {
     console.error("Erro Gecko:", error.response ? error.response.data : error.message);
-    res.json([]); 
+    res.json([]); // Retorna vazio se der erro, pra não travar o site
   }
 });
 
-// Rota de Pagamento PIX (BlackCat)
+// ROTA DO PIX (BlackCat)
 app.post('/api/pix', async (req, res) => {
   const { amount, customer } = req.body;
 
