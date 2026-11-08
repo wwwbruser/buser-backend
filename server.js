@@ -1,16 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const axios = require('axios');
-
-puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(cors());
 app.use(express.static(__dirname));
 
-// 👇 COLOQUE SUA CHAVE DO GECKO AQUI (se tiver, senão deixe vazio)
 const GECKO_API_KEY = process.env.GECKO_API_KEY || '';
 
 app.get('/api/clickbus/search', async (req, res) => {
@@ -45,23 +42,16 @@ app.get('/api/clickbus/search', async (req, res) => {
     }
   }
 
-  // 2. Fallback: Puppeteer (se o Gecko falhar)
+  // 2. Fallback: Puppeteer com Chrome Leve (Render Free Tier)
   let browser;
   try {
-    console.log("🤖 [Puppeteer] Iniciando navegador...");
+    console.log("🤖 [Puppeteer] Iniciando navegador ultra-leve...");
     
-    // Configuração blindada para o Render
     browser = await puppeteer.launch({
-      headless: "new",
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // Essencial para o Render
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process' 
-      ]
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -172,7 +162,6 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 });
 
-// Função auxiliar para formatar Gecko
 function formatarViagensGecko(rawTrips) {
   return rawTrips.map(trip => ({
     company: { name: trip.travelCompany?.name || "Viação" },
