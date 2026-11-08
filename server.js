@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Puxa a chave do Render (Environment Variables)
+// Puxa a chave da GeckoAPI salva no Render
 const GECKO_API_KEY = process.env.GECKO_API_KEY; 
 
 app.get('/api/clickbus/search', async (req, res) => {
