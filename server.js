@@ -6,12 +6,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Puxa a chave da GeckoAPI salva no Render
 const GECKO_API_KEY = process.env.GECKO_API_KEY; 
 
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
   console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
+
+  // TRAVA DE SEGURANÇA: Se não vier origem ou destino, nem tenta buscar
+  if (!origem || !destino || !data) {
+    return res.json([]); 
+  }
 
   try {
     const origemParts = origem.split(',').map(s => s.trim());
@@ -37,7 +41,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     res.json(viagens); 
     
   } catch (error) {
-    console.error("Erro Gecko:", error.response ? error.response.data : error.message);
+    console.error("Erro Gecko:", error.message);
     res.json([]); 
   }
 });
