@@ -1,17 +1,46 @@
-    try {
-      // Chama o SEU servidor no Render
-      const response = await fetch(`https://buser-online.onrender.com/api/clickbus/search?origem=${encodeURIComponent(origemTexto)}&destino=${encodeURIComponent(destinoTexto)}&data=${dataIda}`);
-      
-      if (!response.ok) throw new Error('Erro na resposta do servidor');
-      const viagens = await response.json();
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
 
-      if (!viagens || viagens.length === 0) {
-        listaViagens.innerHTML = `<div style="text-align: center; padding: 40px 20px; background:#fff; border-radius:16px; border:1px solid #e0e0e0;"><span style="font-size: 40px;">🚌</span><h3 style="margin-top: 10px; color: #454545;">Nenhuma viagem encontrada</h3><p style="color: #757575;">Não achamos ônibus para essa rota nessa data. Tente mudar o dia ou escolher outra cidade.</p></div>`;
-        return;
-      }
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-      viagensOriginais = viagens;
-      gerarFiltros(viagens);
-      renderizarViagens(viagens);
-      filtrosSidebar.style.display = 'block';
-    } catch (error) { ... }
+// Puxa a chave da GeckoAPI salva no Render
+const GECKO_API_KEY = process.env.GECKO_API_KEY; 
+
+app.get('/api/clickbus/search', async (req, res) => {
+  const { origem, destino, data } = req.query;
+  console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
+
+  try {
+    const origemParts = origem.split(',').map(s => s.trim());
+    const destinoParts = destino.split(',').map(s => s.trim());
+    
+    const payload = {
+      target: 'clickbus.com.br',
+      type: 'plp',
+      page: 1,
+      originCity: origemParts[0],
+      originState: origemParts[1] || 'SP',
+      destinationCity: destinoParts[0],
+      destinationState: destinoParts[1] || 'SP',
+      departureDate: data
+    };
+
+    const response = await axios.post('https://api.geckoapi.com.br/v1/extract', payload, {
+      headers: { 'Authorization': `Bearer ${GECKO_API_KEY}`, 'Content-Type': 'application/json' }
+    });
+    
+    let viagens = response.data && response.data.results ? response.data.results : [];
+    console.log(`SUCESSO! ${viagens.length} viagens encontradas.`);
+    res.json(viagens); 
+    
+  } catch (error) {
+    console.error("Erro Gecko:", error.response ? error.response.data : error.message);
+    res.json([]); 
+  }
+});
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
