@@ -30,8 +30,15 @@ function encontrarArrayDeViagens(obj) {
     return melhorArray;
 }
 
-// AUMENTEI A LISTA DE POSSIBILIDADES PARA ACHAR O NOME
+// 🕵️‍♂️ CAÇADOR DE EMPRESA COM O CAMPO EXATO REVELADO PELO RAIO-X
 function acharNomeEmpresa(v) {
+    // 1. O CAMPO EXATO QUE O RAIO-X REVELOU
+    if (v.travelCompany) {
+        if (typeof v.travelCompany === 'string' && v.travelCompany.trim().length > 2) return v.travelCompany.trim();
+        if (v.travelCompany.name && v.travelCompany.name.trim().length > 2) return v.travelCompany.name.trim();
+    }
+
+    // 2. Fallbacks (caso alguma outra rota venha em formato diferente)
     const possiveis = [
         v.company?.name, v.empresa, v.operator?.name, v.transportCompany?.name, 
         v.service?.company?.name, v.companyName, v.brand, v.carrier?.name,
@@ -103,10 +110,6 @@ app.get('/api/clickbus/search', async (req, res) => {
       const viagensRaw = encontrarArrayDeViagens(response.data);
 
       if (viagensRaw && viagensRaw.length > 0) {
-        // --- RAIO-X FOCADO ---
-        console.log(`🔍 [RAIO-X] Chaves da 1ª viagem:`, Object.keys(viagensRaw[0]));
-        // ---------------------
-
         console.log(`✅ [GeckoAPI] Caçador encontrou ${viagensRaw.length} viagens! Formatando...`);
         
         const viagensFormatadas = viagensRaw.map(v => {
