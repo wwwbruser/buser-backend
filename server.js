@@ -38,6 +38,7 @@ app.get('/api/clickbus/search', async (req, res) => {
   // 1. TENTATIVA GECKOAPI (Rápida e Confiável)
   // ==========================================
   const geckoKey = process.env.GECKO_API_KEY;
+  let geckoRetornouViagens = false;
 
   if (geckoKey) {
     try {
@@ -80,8 +81,8 @@ app.get('/api/clickbus/search', async (req, res) => {
         
         return res.json(viagensFormatadas);
       } else {
-        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada para esta data.`);
-        return res.json([]);
+        // CORREÇÃO AQUI: Não retorna vazio, apenas avisa e deixa o código seguir para o Puppeteer!
+        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada. Caindo para o Puppeteer...`);
       }
     } catch (error) {
       console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}. Caindo para o Puppeteer...`);
