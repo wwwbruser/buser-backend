@@ -38,7 +38,6 @@ app.get('/api/clickbus/search', async (req, res) => {
   // 1. TENTATIVA GECKOAPI (Rápida e Confiável)
   // ==========================================
   const geckoKey = process.env.GECKO_API_KEY;
-  let geckoRetornouViagens = false;
 
   if (geckoKey) {
     try {
@@ -60,7 +59,7 @@ app.get('/api/clickbus/search', async (req, res) => {
           'Authorization': `Bearer ${geckoKey}`,
           'Content-Type': 'application/json'
         },
-        timeout: 15000 // 15 segundos
+        timeout: 45000 // CORREÇÃO AQUI: Aumentado de 15s para 45 segundos
       });
 
       const viagens = response.data.data || response.data;
@@ -81,7 +80,6 @@ app.get('/api/clickbus/search', async (req, res) => {
         
         return res.json(viagensFormatadas);
       } else {
-        // CORREÇÃO AQUI: Não retorna vazio, apenas avisa e deixa o código seguir para o Puppeteer!
         console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada. Caindo para o Puppeteer...`);
       }
     } catch (error) {
