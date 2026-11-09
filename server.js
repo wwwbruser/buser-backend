@@ -6,22 +6,6 @@ const axios = require('axios');
 const app = express();
 app.use(cors());
 
-// ==========================================
-// SUA CHAVE DA GECKOAPI AQUI:
-// ==========================================
-const GECKO_API_KEY = "pk_live_LxQWsRP6ZkPhKhlcesAtzoiWJ6GilfAN"; 
-
-// Função para formatar a URL da ClickBus
-function slugify(text) {
-  return text.toString().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '');
-}
-
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
@@ -32,33 +16,68 @@ app.get('/api/clickbus/search', async (req, res) => {
   console.log(`\n🔎 [Buscando]: ${origem} -> ${destino} | Data: ${data}`);
 
   // ==========================================
-  // 1. TENTATIVA GECKOAPI
+  // 1. TENTATIVA GECKOAPI (Correta)
   // ==========================================
-  try {
-    console.log(`⏳ Tentando GeckoAPI...`);
-    // Nota: Se a URL da GeckoAPI for diferente, ajuste aqui.
-    const response = await axios.get('https://api.geckoapi.com.br/v1/bus/search', {
-      headers: { 'Authorization': `Bearer ${GECKO_API_KEY}` },
-      params: { origem, destino, data },
-      timeout: 8000 // 8 segundos máximo
-    });
+  const geckoKey = process.env.GECKO_API_KEY;
 
-    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-      console.log(`✅ [GeckoAPI] Sucesso! ${response.data.length} viagens.`);
-      return res.json(response.data);
+  if (geckoKey && origem !== 'ping') {
+    try {
+      console.log(`⏳ Tentando GeckoAPI (Extract)...`);
+      
+      // Separa a cidade do estado (ex: "São Paulo, SP")
+      const [origemCidade, origemEstado] = origem.split(',').map(s => s.trim());
+      const [destinoCidade, destinoEstado] = destino.split(',').map(s => s.trim());
+
+      const response = await axios.post('https://api.geckoapi.com.br/v1/extract', {
+        target: 'clickbus.com.br',
+        type: 'plp',
+        originCity: origemCidade,
+        originState: origemEstado,
+        destinationCity: destinoCidade,
+        destinationState: destinoEstado,
+        departureDate: data,
+        page: 1
+      }, {
+        headers: {
+          'Authorization': `Bearer ${geckoKey}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000 // 15 segundos
+      });
+
+      const viagens = response.data.data || response.data;
+      
+      if (viagens && Array.isArray(viagens) && viagens.length > 0) {
+        console.log(`✅ [GeckoAPI] Sucesso! ${viagens.length} viagens encontradas.`);
+        
+        // Padroniza os dados para o seu front-end
+        const viagensFormatadas = viagens.map(v => ({
+          company: { name: v.company || v.empresa || 'Viação' },
+          bus_type: v.busType || v.tipo || 'Convencional',
+          departure: { time: v.departureTime || v.horarioSaida || '00:00', terminal: 'Rodoviária' },
+          arrival: { time: v.arrivalTime || v.horarioChegada || '00:00', terminal: 'Rodoviária' },
+          price: parseFloat(v.price || v.preco || 0),
+          total_seats: v.totalSeats || 46,
+          occupied_seats: [2, 5, 9] // Simulação para o mapa
+        }));
+        
+        return res.json(viagensFormatadas);
+      } else {
+        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada para esta data.`);
+        return res.json([]);
+      }
+    } catch (error) {
+      console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}. Caindo para o Puppeteer...`);
     }
-  } catch (error) {
-    console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}. Caindo para o Puppeteer...`);
   }
 
   // ==========================================
-  // 2. TENTATIVA PUPPETEER (Plano B)
+  // 2. TENTATIVA PUPPETEER (Plano B Otimizado)
   // ==========================================
   let browser = null;
   try {
     console.log(`🤖 [Puppeteer] Iniciando navegador...`);
     
-    // Flags para não travar o Render (limite de 512MB)
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
@@ -75,7 +94,7 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     const page = await browser.newPage();
     
-    // Bloquear imagens e CSS (Deixa a busca muito mais rápida)
+    // Bloqueia imagens, fontes e CSS para ficar muito mais rápido
     await page.setRequestInterception(true);
     page.on('request', (request) => {
       const resourceType = request.resourceType();
@@ -86,37 +105,33 @@ app.get('/api/clickbus/search', async (req, res) => {
       }
     });
 
-    const origemSlug = slugify(origem);
-    const destinoSlug = slugify(destino);
+    function slugify(text) {
+      return text.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
+    }
+
+    const origemSlug = slugify(origem.split(',')[0]);
+    const destinoSlug = slugify(destino.split(',')[0]);
     const url = `https://www.clickbus.com.br/onibus/${origemSlug}-todos/${destinoSlug}-todos?departureDate=${data}`;
     
     console.log(`🤖 [Puppeteer] Navegando para: ${url}`);
     
-    // Vai para a URL e espera o HTML principal carregar
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     
-    // Espera 5 segundos para o site da ClickBus carregar os cards de viagens via JavaScript
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Espera 6 segundos para o React da ClickBus renderizar os preços
+    await new Promise(resolve => setTimeout(resolve, 6000));
 
-    // Tenta extrair os dados usando o texto da página
     const viagens = await page.evaluate(() => {
       const resultados = [];
-      // Tenta buscar botões ou divs que contenham os preços
       const elements = document.querySelectorAll('div, button, article');
       
-      // Esta é uma extração genérica. Pode precisar de ajuste fino dependendo do layout atual da ClickBus.
       elements.forEach(el => {
         const texto = el.innerText || '';
-        // Se o texto tem "R$" e "Poltrona" ou é um card de viagem
         if (texto.includes('R$') && (texto.includes(':') || texto.toLowerCase().includes('leito') || texto.toLowerCase().includes('convencional'))) {
-            // Evita pegar o card "pai" que contém todos os outros
             if (el.children.length > 0 && el.children[0].innerText?.includes('R$')) return;
 
             const linhas = texto.split('\n').filter(t => t.trim() !== '');
             if (linhas.length > 3 && linhas.length < 15) {
-                // Procura o preço
                 const precoMatch = texto.match(/R\$\s*([\d.,]+)/);
-                // Procura horários (ex: 08:30)
                 const horarios = texto.match(/(\d{2}:\d{2})/g);
 
                 if (precoMatch && horarios && horarios.length >= 2) {
@@ -130,14 +145,13 @@ app.get('/api/clickbus/search', async (req, res) => {
                         arrival: { time: horarios[1], terminal: 'Rodoviária' },
                         price: preco,
                         total_seats: 46,
-                        occupied_seats: [2, 5, 9] // Simulação de ocupadas
+                        occupied_seats: [2, 5, 9]
                     });
                 }
             }
         }
       });
 
-      // Remove duplicatas (mesma empresa, mesmo preço, mesmo horário)
       const unicos = [];
       const vistos = new Set();
       resultados.forEach(v => {
@@ -147,7 +161,6 @@ app.get('/api/clickbus/search', async (req, res) => {
               unicos.push(v);
           }
       });
-
       return unicos;
     });
 
@@ -157,7 +170,7 @@ app.get('/api/clickbus/search', async (req, res) => {
       console.log(`✅ [Puppeteer] ${viagens.length} viagens reais encontradas.`);
       return res.json(viagens);
     } else {
-      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada (pode ser bloqueio ou falta de horários).`);
+      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada. (Bloqueio da ClickBus ou sem horários).`);
       return res.json([]); 
     }
 
