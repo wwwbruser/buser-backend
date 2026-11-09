@@ -13,18 +13,21 @@ app.get('/api/clickbus/search', async (req, res) => {
     return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
   }
 
+  // Se for o ping do UptimeRobot, retorna logo
+  if (origem === 'ping' || destino === 'ping') {
+    return res.send('pong');
+  }
+
   console.log(`\n🔎 [Buscando]: ${origem} -> ${destino} | Data: ${data}`);
 
   // ==========================================
-  // 1. TENTATIVA GECKOAPI (Correta)
+  // 1. TENTATIVA GECKOAPI
   // ==========================================
   const geckoKey = process.env.GECKO_API_KEY;
 
-  if (geckoKey && origem !== 'ping') {
+  if (geckoKey) {
     try {
-      console.log(`⏳ Tentando GeckoAPI (Extract)...`);
-      
-      // Separa a cidade do estado (ex: "São Paulo, SP")
+      console.log(`⏳ Tentando GeckoAPI...`);
       const [origemCidade, origemEstado] = origem.split(',').map(s => s.trim());
       const [destinoCidade, destinoEstado] = destino.split(',').map(s => s.trim());
 
@@ -48,9 +51,9 @@ app.get('/api/clickbus/search', async (req, res) => {
       const viagens = response.data.data || response.data;
       
       if (viagens && Array.isArray(viagens) && viagens.length > 0) {
-        console.log(`✅ [GeckoAPI] Sucesso! ${viagens.length} viagens encontradas.`);
+        console.log(`✅ [GeckoAPI] Sucesso! ${viagens.length} viagens.`);
         
-        // Padroniza os dados para o seu front-end
+        // Padroniza os dados para o nosso front-end
         const viagensFormatadas = viagens.map(v => ({
           company: { name: v.company || v.empresa || 'Viação' },
           bus_type: v.busType || v.tipo || 'Convencional',
@@ -58,12 +61,11 @@ app.get('/api/clickbus/search', async (req, res) => {
           arrival: { time: v.arrivalTime || v.horarioChegada || '00:00', terminal: 'Rodoviária' },
           price: parseFloat(v.price || v.preco || 0),
           total_seats: v.totalSeats || 46,
-          occupied_seats: [2, 5, 9] // Simulação para o mapa
+          occupied_seats: [2, 5, 9]
         }));
-        
         return res.json(viagensFormatadas);
       } else {
-        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada para esta data.`);
+        console.log(`⚠️ [GeckoAPI] Nenhuma viagem para esta data.`);
         return res.json([]);
       }
     } catch (error) {
@@ -72,14 +74,17 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   // ==========================================
-  // 2. TENTATIVA PUPPETEER (Plano B Otimizado)
+  // 2. TENTATIVA PUPPETEER (Otimizada para o Render)
   // ==========================================
   let browser = null;
   try {
     console.log(`🤖 [Puppeteer] Iniciando navegador...`);
     
+    // Flag --single-process REMOVIDA (era o que causava o erro Network.enable)
+    // protocolTimeout aumentado para evitar timeout na comunicação com o Chrome
     browser = await puppeteer.launch({
       headless: 'new',
+      protocolTimeout: 120000, // 2 minutos
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -87,14 +92,13 @@ app.get('/api/clickbus/search', async (req, res) => {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--single-process',
         '--disable-gpu'
       ]
     });
 
     const page = await browser.newPage();
     
-    // Bloqueia imagens, fontes e CSS para ficar muito mais rápido
+    // Bloqueia imagens, CSS e fontes para economizar memória e tempo
     await page.setRequestInterception(true);
     page.on('request', (request) => {
       const resourceType = request.resourceType();
@@ -115,10 +119,11 @@ app.get('/api/clickbus/search', async (req, res) => {
     
     console.log(`🤖 [Puppeteer] Navegando para: ${url}`);
     
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    // Aumentei o timeout para 60s e mudei para networkidle2 (espera a rede acalmar)
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
     
-    // Espera 6 segundos para o React da ClickBus renderizar os preços
-    await new Promise(resolve => setTimeout(resolve, 6000));
+    // Espera mais 5 segundos para garantir que o React renderizou os preços
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     const viagens = await page.evaluate(() => {
       const resultados = [];
@@ -152,6 +157,7 @@ app.get('/api/clickbus/search', async (req, res) => {
         }
       });
 
+      // Remove duplicatas
       const unicos = [];
       const vistos = new Set();
       resultados.forEach(v => {
@@ -164,24 +170,27 @@ app.get('/api/clickbus/search', async (req, res) => {
       return unicos;
     });
 
-    await browser.close();
-
     if (viagens.length > 0) {
       console.log(`✅ [Puppeteer] ${viagens.length} viagens reais encontradas.`);
       return res.json(viagens);
     } else {
-      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada. (Bloqueio da ClickBus ou sem horários).`);
+      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada.`);
       return res.json([]); 
     }
 
   } catch (error) {
-    if (browser) await browser.close();
     console.error(`❌ Erro crítico no Puppeteer:`, error.message);
-    return res.status(500).json({ error: 'Falha ao buscar viagens. Servidor ocupado.' });
+    return res.status(500).json({ error: 'Falha ao buscar viagens.' });
+  } finally {
+    // GARANTE que o navegador feche para não travar o Render
+    if (browser) {
+      await browser.close();
+      console.log(`🤖 [Puppeteer] Navegador fechado.`);
+    }
   }
 });
 
-// Rota para o UptimeRobot não deixar o servidor dormir
+// Rota para o UptimeRobot
 app.get('/', (req, res) => res.send('API Buser Online'));
 
 const PORT = process.env.PORT || 10000;
