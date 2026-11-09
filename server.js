@@ -1,6 +1,5 @@
 browser = await puppeteer.launch({
   headless: 'new',
-  executablePath: require('puppeteer').executablePath(), // Linha adicionada
   protocolTimeout: 120000,
   args: [
     '--no-sandbox',
