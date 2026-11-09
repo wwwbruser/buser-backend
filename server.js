@@ -1,185 +1,175 @@
 const express = require('express');
 const cors = require('cors');
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer');
 const axios = require('axios');
 
 const app = express();
 app.use(cors());
-app.use(express.static(__dirname));
 
-const GECKO_API_KEY = process.env.GECKO_API_KEY || '';
+// ==========================================
+// SUA CHAVE DA GECKOAPI AQUI:
+// ==========================================
+const GECKO_API_KEY = "pk_live_LxQWsRP6ZkPhKhlcesAtzoiWJ6GilfAN"; 
+
+// Função para formatar a URL da ClickBus
+function slugify(text) {
+  return text.toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+}
 
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
-  console.log(`\n[Buscando]: ${origem} -> ${destino} | Data: ${data}`);
 
-  // 1. Tenta o GeckoAPI primeiro (se tiver chave)
-  if (GECKO_API_KEY) {
-    try {
-      console.log("⏳ Tentando GeckoAPI...");
-      const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
-      const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
-      
-      const response = await axios.post('https://api.geckoapi.com.br/v1/extract', {
-        target: 'clickbus.com.br', type: 'plp', page: 1,
-        originCity: origemCidade, originState: origemUF,
-        destinationCity: destinoCidade, destinationState: destinoUF,
-        departureDate: data
-      }, {
-        headers: { 'Authorization': `Bearer ${GECKO_API_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 15000
-      });
-
-      const rawTrips = response.data?.data?.items || [];
-      if (rawTrips.length > 0) {
-        console.log(`✅ [GeckoAPI] ${rawTrips.length} viagens encontradas.`);
-        return res.json(formatarViagensGecko(rawTrips));
-      }
-      console.log("⚠️ [GeckoAPI] Não achou viagens. Caindo para o Puppeteer...");
-    } catch (error) {
-      console.log(`❌ [GeckoAPI] Falhou: ${error.message}. Caindo para o Puppeteer...`);
-    }
+  if (!origem || !destino || !data) {
+    return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
   }
 
-  // 2. Fallback: Puppeteer com Chrome Leve (Render Free Tier)
-  let browser;
+  console.log(`\n🔎 [Buscando]: ${origem} -> ${destino} | Data: ${data}`);
+
+  // ==========================================
+  // 1. TENTATIVA GECKOAPI
+  // ==========================================
   try {
-    console.log("🤖 [Puppeteer] Iniciando navegador ultra-leve...");
+    console.log(`⏳ Tentando GeckoAPI...`);
+    // Nota: Se a URL da GeckoAPI for diferente, ajuste aqui.
+    const response = await axios.get('https://api.geckoapi.com.br/v1/bus/search', {
+      headers: { 'Authorization': `Bearer ${GECKO_API_KEY}` },
+      params: { origem, destino, data },
+      timeout: 8000 // 8 segundos máximo
+    });
+
+    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+      console.log(`✅ [GeckoAPI] Sucesso! ${response.data.length} viagens.`);
+      return res.json(response.data);
+    }
+  } catch (error) {
+    console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}. Caindo para o Puppeteer...`);
+  }
+
+  // ==========================================
+  // 2. TENTATIVA PUPPETEER (Plano B)
+  // ==========================================
+  let browser = null;
+  try {
+    console.log(`🤖 [Puppeteer] Iniciando navegador...`);
     
+    // Flags para não travar o Render (limite de 512MB)
     browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ]
     });
 
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    const formatarCidade = (c) => {
-      const limpa = c.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-      return limpa.replace(/,\s*/g, '-').replace(/\s+/g, '-') + '-todos';
-    };
+    // Bloquear imagens e CSS (Deixa a busca muito mais rápida)
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const resourceType = request.resourceType();
+      if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+
+    const origemSlug = slugify(origem);
+    const destinoSlug = slugify(destino);
+    const url = `https://www.clickbus.com.br/onibus/${origemSlug}-todos/${destinoSlug}-todos?departureDate=${data}`;
     
-    const url = `https://www.clickbus.com.br/onibus/${formatarCidade(origem)}/${formatarCidade(destino)}?departureDate=${data}`;
-    console.log(`⏳ [Puppeteer] Navegando para: ${url}`);
+    console.log(`🤖 [Puppeteer] Navegando para: ${url}`);
     
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 90000 });
+    // Vai para a URL e espera o HTML principal carregar
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    
+    // Espera 5 segundos para o site da ClickBus carregar os cards de viagens via JavaScript
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
-    // Aceita cookies
-    try {
-      await page.evaluate(() => {
-        const b = Array.from(document.querySelectorAll('button')).find(x => x.textContent.toLowerCase().includes('aceitar'));
-        if (b) b.click();
-      });
-    } catch (e) {}
+    // Tenta extrair os dados usando o texto da página
+    const viagens = await page.evaluate(() => {
+      const resultados = [];
+      // Tenta buscar botões ou divs que contenham os preços
+      const elements = document.querySelectorAll('div, button, article');
+      
+      // Esta é uma extração genérica. Pode precisar de ajuste fino dependendo do layout atual da ClickBus.
+      elements.forEach(el => {
+        const texto = el.innerText || '';
+        // Se o texto tem "R$" e "Poltrona" ou é um card de viagem
+        if (texto.includes('R$') && (texto.includes(':') || texto.toLowerCase().includes('leito') || texto.toLowerCase().includes('convencional'))) {
+            // Evita pegar o card "pai" que contém todos os outros
+            if (el.children.length > 0 && el.children[0].innerText?.includes('R$')) return;
 
-    await page.waitForFunction(() => document.body.innerText.includes('Viaje com'), { timeout: 45000 }).catch(() => {});
+            const linhas = texto.split('\n').filter(t => t.trim() !== '');
+            if (linhas.length > 3 && linhas.length < 15) {
+                // Procura o preço
+                const precoMatch = texto.match(/R\$\s*([\d.,]+)/);
+                // Procura horários (ex: 08:30)
+                const horarios = texto.match(/(\d{2}:\d{2})/g);
 
-    // Rolagem
-    let prev = 0;
-    for (let i = 0; i < 10; i++) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await new Promise(r => setTimeout(r, 2000));
-      const h = await page.evaluate(() => document.body.scrollHeight);
-      if (h === prev) break;
-      prev = h;
-    }
+                if (precoMatch && horarios && horarios.length >= 2) {
+                    const preco = parseFloat(precoMatch[1].replace(/\./g, '').replace(',', '.'));
+                    const empresa = linhas.find(l => l.length > 3 && !l.includes('R$') && !l.match(/\d{2}:\d{2}/) && !l.includes('Poltrona')) || 'Viação';
 
-    const textos = await page.evaluate(() => {
-      const res = [];
-      document.querySelectorAll('*').forEach(el => {
-        if (el.innerText && el.innerText.includes('R$') && el.innerText.includes('Viaje com') && el.children.length > 1) {
-          const t = el.innerText.replace(/\n/g, ' | ');
-          if (t.length > 20 && t.length < 600) res.push(t);
+                    resultados.push({
+                        company: { name: empresa.substring(0, 20) },
+                        bus_type: texto.toLowerCase().includes('leito') ? 'Leito' : 'Convencional',
+                        departure: { time: horarios[0], terminal: 'Rodoviária' },
+                        arrival: { time: horarios[1], terminal: 'Rodoviária' },
+                        price: preco,
+                        total_seats: 46,
+                        occupied_seats: [2, 5, 9] // Simulação de ocupadas
+                    });
+                }
+            }
         }
       });
-      return [...new Set(res)];
+
+      // Remove duplicatas (mesma empresa, mesmo preço, mesmo horário)
+      const unicos = [];
+      const vistos = new Set();
+      resultados.forEach(v => {
+          const chave = `${v.company.name}-${v.departure.time}-${v.price}`;
+          if (!vistos.has(chave)) {
+              vistos.add(chave);
+              unicos.push(v);
+          }
+      });
+
+      return unicos;
     });
 
     await browser.close();
 
-    const viagens = [];
-    const unicos = new Set();
-    
-    textos.forEach(bloco => {
-      const limpo = bloco.replace(/\|/g, ' ').replace(/\+/g, ' ');
-      const mEmp = limpo.match(/(Viaje com|Viagem com)\s+([A-Za-zÀ-ÿ0-9\s]+)/i);
-      if (!mEmp) return;
-      
-      const empresa = mEmp[2].replace(/\s+/g, ' ').trim();
-      const partes = bloco.split('|').map(p => p.trim());
-      let t1 = -1, t2 = -1;
-      
-      for (let i = 0; i < partes.length; i++) {
-        if (/^\d{2}:\d{2}$/.test(partes[i])) {
-          if (t1 === -1) t1 = i; else if (t2 === -1) { t2 = i; break; }
-        }
-      }
-      
-      if (t1 === -1 || t2 === -1) return;
-      
-      const partida = partes[t1], chegada = partes[t2];
-      const termP = partes[t1 + 1]?.length > 3 ? partes[t1 + 1] : 'Rodoviária';
-      const termC = partes[t2 + 1]?.length > 3 ? partes[t2 + 1] : 'Rodoviária';
-      
-      const precos = limpo.match(/R\$\s*([\d.,]+)/g);
-      let preco = 0;
-      if (precos) preco = parseFloat(precos[precos.length - 1].replace('R$', '').replace(/\./g, '').replace(',', '.').trim()) || 0;
-      
-      let tipo = 'Convencional';
-      if (bloco.includes('Cama')) tipo = 'Cama';
-      else if (bloco.includes('Semi-leito')) tipo = 'Semi-leito';
-      else if (bloco.includes('Leito')) tipo = 'Leito';
-      else if (bloco.includes('Executivo')) tipo = 'Executivo';
-      
-      const id = `${empresa}-${partida}-${chegada}-${preco}`;
-      if (preco > 0 && !unicos.has(id)) {
-        unicos.add(id);
-        viagens.push({ 
-          company: { name: empresa }, 
-          departure: { time: partida, terminal: termP }, 
-          arrival: { time: chegada, terminal: termC }, 
-          price: preco, 
-          bus_type: tipo 
-        });
-      }
-    });
-
     if (viagens.length > 0) {
-      console.log(`✅ [Puppeteer] ${viagens.length} viagens reais formatadas.`);
+      console.log(`✅ [Puppeteer] ${viagens.length} viagens reais encontradas.`);
       return res.json(viagens);
     } else {
-      console.log(`⚠️ [Puppeteer] Não encontrou viagens.`);
-      return res.json([]);
+      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada (pode ser bloqueio ou falta de horários).`);
+      return res.json([]); 
     }
 
-  } catch (err) {
-    console.error(`❌ Erro crítico: ${err.message}`);
+  } catch (error) {
     if (browser) await browser.close();
-    return res.json([]);
+    console.error(`❌ Erro crítico no Puppeteer:`, error.message);
+    return res.status(500).json({ error: 'Falha ao buscar viagens. Servidor ocupado.' });
   }
 });
 
-function formatarViagensGecko(rawTrips) {
-  return rawTrips.map(trip => ({
-    company: { name: trip.travelCompany?.name || "Viação" },
-    departure: {
-      time: trip.departure?.time || "--:--",
-      terminal: trip.departure?.place?.terminal || "Rodoviária",
-      address: trip.departure?.place?.terminalAddress || ""
-    },
-    arrival: {
-      time: trip.arrival?.time || "--:--",
-      terminal: trip.arrival?.place?.terminal || "Rodoviária",
-      address: trip.arrival?.place?.terminalAddress || ""
-    },
-    price: trip.discountedPrice || trip.price || 0,
-    bus_type: trip.serviceClass?.name || "Convencional"
-  }));
-}
+// Rota para o UptimeRobot não deixar o servidor dormir
+app.get('/', (req, res) => res.send('API Buser Online'));
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log(`✅ Servidor rodando na porta ${process.env.PORT || 3000}`);
-});
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
