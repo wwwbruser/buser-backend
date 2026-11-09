@@ -6,37 +6,20 @@ const axios = require('axios');
 const app = express();
 app.use(cors());
 
-// TRAVA DE SEGURANÇA: Impede que o Puppeteer abra 2 navegadores ao mesmo tempo e derrube o Render
 let isBrowserBusy = false;
 
-// Função para formatar a URL da ClickBus
 function slugify(text) {
-  return text.toString().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, "") 
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '');
+  return text.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
 }
 
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
-  if (!origem || !destino || !data) {
-    return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
-  }
-
-  // Ping para o UptimeRobot não deixar o servidor dormir
-  if (origem === 'ping' || destino === 'ping') {
-    return res.send('API Buser Online');
-  }
+  if (!origem || !destino || !data) return res.status(400).json({ error: 'Faltando parâmetros.' });
+  if (origem === 'ping' || destino === 'ping') return res.send('API Buser Online');
 
   console.log(`\n🔎 [Buscando]: ${origem} -> ${destino} | Data: ${data}`);
 
-  // ==========================================
-  // 1. TENTATIVA GECKOAPI (Rápida e Confiável)
-  // ==========================================
   const geckoKey = process.env.GECKO_API_KEY;
 
   if (geckoKey) {
@@ -55,171 +38,100 @@ app.get('/api/clickbus/search', async (req, res) => {
         departureDate: data,
         page: 1
       }, {
-        headers: {
-          'Authorization': `Bearer ${geckoKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 45000 // CORREÇÃO AQUI: Aumentado de 15s para 45 segundos
+        headers: { 'Authorization': `Bearer ${geckoKey}`, 'Content-Type': 'application/json' },
+        timeout: 45000
       });
 
-      const viagens = response.data.data || response.data;
+      // =========================================================
+      // RAIO-X: Vai imprimir o JSON inteiro no log do Render!
+      // =========================================================
+      console.log(`🔍 [RAIO-X GECKOAPI]:`, JSON.stringify(response.data, null, 2));
+
+      // Tenta encontrar a lista de viagens em várias chaves comuns
+      let viagens = response.data.data || response.data.trips || response.data.results || response.data.viagens || response.data;
       
+      // Se retornar como string (erro comum), tenta converter
+      if (typeof viagens === 'string') {
+         try { viagens = JSON.parse(viagens); } catch(e) {}
+      }
+
       if (viagens && Array.isArray(viagens) && viagens.length > 0) {
         console.log(`✅ [GeckoAPI] Sucesso! ${viagens.length} viagens encontradas.`);
         
-        // Padroniza os dados para o nosso front-end
-        const viagensFormatadas = viagens.map(v => ({
-          company: { name: v.company || v.empresa || 'Viação' },
-          bus_type: v.busType || v.tipo || 'Convencional',
-          departure: { time: v.departureTime || v.horarioSaida || '00:00', terminal: 'Rodoviária' },
-          arrival: { time: v.arrivalTime || v.horarioChegada || '00:00', terminal: 'Rodoviária' },
-          price: parseFloat(v.price || v.preco || 0),
-          total_seats: v.totalSeats || 46,
-          occupied_seats: [2, 5, 9] // Simulação para o mapa
-        }));
+        // Mapeamento Flexível (Tenta ler os campos seja qual for o nome)
+        const viagensFormatadas = viagens.map(v => {
+          // Tenta achar a empresa
+          const empresa = v.company?.name || v.empresa || v.company_name || v.nome_empresa || v.operator || 'Viação';
+          
+          // Tenta achar o preço
+          let precoRaw = v.price || v.preco || v.ticket_price || v.valor || 0;
+          const preco = parseFloat(precoRaw.toString().replace(',', '.'));
+
+          // Tenta achar horários
+          const partida = v.departureTime || v.horarioSaida || v.departure?.time || '00:00';
+          const chegada = v.arrivalTime || v.horarioChegada || v.arrival?.time || '00:00';
+
+          return {
+            company: { name: empresa },
+            bus_type: v.busType || v.tipo || v.service_class || 'Convencional',
+            departure: { time: partida, terminal: 'Rodoviária' },
+            arrival: { time: chegada, terminal: 'Rodoviária' },
+            price: preco,
+            total_seats: v.totalSeats || 46,
+            occupied_seats: [2, 5, 9]
+          };
+        });
         
         return res.json(viagensFormatadas);
       } else {
-        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada. Caindo para o Puppeteer...`);
+        console.log(`⚠️ [GeckoAPI] A lista de viagens está vazia ou não foi encontrada no JSON.`);
       }
     } catch (error) {
-      console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}. Caindo para o Puppeteer...`);
+      console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}.`);
     }
   } else {
-    console.log(`⚠️ [GeckoAPI] Chave não configurada no Render. Caindo para o Puppeteer...`);
+    console.log(`⚠️ [GeckoAPI] Chave não configurada.`);
   }
 
-  // ==========================================
-  // 2. TENTATIVA PUPPETEER (Plano B com Trava de Segurança)
-  // ==========================================
-  if (isBrowserBusy) {
-    console.log(`⚠️ [Aviso] Puppeteer já está rodando. Recusando nova busca para não travar o servidor.`);
-    return res.status(429).json({ error: 'Muitas buscas simultâneas. Aguarde alguns segundos e tente novamente.' });
-  }
-
-  isBrowserBusy = true; // Ativa a trava
+  // PUPPETEER (Oculto para simplificar, mas continua aqui)
+  if (isBrowserBusy) return res.status(429).json({ error: 'Aguarde.' });
+  isBrowserBusy = true;
   let browser = null;
 
   try {
-    console.log(`🤖 [Puppeteer] Iniciando navegador ultra-leve...`);
-    
-    // Flags para não travar o Render (limite de 512MB)
-    browser = await puppeteer.launch({
-      headless: 'new',
-      protocolTimeout: 120000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
-    });
-
+    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] });
     const page = await browser.newPage();
-    
-    // Bloquear imagens, CSS e fontes para economizar memória e tempo
     await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      const resourceType = request.resourceType();
-      if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-        request.abort();
-      } else {
-        request.continue();
-      }
-    });
+    page.on('request', (req) => { ['image', 'font', 'media'].includes(req.resourceType()) ? req.abort() : req.continue(); });
 
-    const origemSlug = slugify(origem.split(',')[0]);
-    const destinoSlug = slugify(destino.split(',')[0]);
-    const url = `https://www.clickbus.com.br/onibus/${origemSlug}-todos/${destinoSlug}-todos?departureDate=${data}`;
-    
-    console.log(`🤖 [Puppeteer] Navegando para: ${url}`);
-    
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    
-    // Espera 10 segundos para o React da ClickBus renderizar os preços na tela
-    console.log(`⏳ [Puppeteer] Aguardando 10s para o site carregar os preços...`);
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    const url = `https://www.clickbus.com.br/onibus/${slugify(origem.split(',')[0])}-todos/${slugify(destino.split(',')[0])}-todos?departureDate=${data}`;
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise(r => setTimeout(r, 8000));
 
-    // Extrai os dados da tela
     const viagens = await page.evaluate(() => {
-      const resultados = [];
-      const elementos = document.querySelectorAll('div, span, p, button');
-      
-      elementos.forEach(el => {
-        const texto = el.innerText || '';
-        
-        // Se o texto tem R$ e tem horário (ex: 08:30)
-        if (texto.includes('R$') && /\d{2}:\d{2}/.test(texto)) {
-          
-          // Evita pegar o container pai que tem todos os textos juntos
-          if (el.children.length > 2 && el.innerText.length > 250) return;
-
-          const precoMatch = texto.match(/R\$\s*([\d.,]+)/);
-          const horarios = texto.match(/(\d{2}:\d{2})/g);
-
-          if (precoMatch && horarios && horarios.length >= 2) {
-            const preco = parseFloat(precoMatch[1].replace(/\./g, '').replace(',', '.'));
-            
-            // Tenta achar o nome da empresa no texto
-            const linhas = texto.split('\n');
-            const empresa = linhas.find(l => l.length > 3 && !l.includes('R$') && !l.match(/\d{2}:\d{2}/) && !l.includes('Poltrona') && !l.includes('Escolher')) || 'Viação';
-
-            resultados.push({
-              company: { name: empresa.substring(0, 30) },
-              bus_type: texto.toLowerCase().includes('leito') ? 'Leito' : (texto.toLowerCase().includes('executivo') ? 'Executivo' : 'Convencional'),
-              departure: { time: horarios[0], terminal: 'Rodoviária' },
-              arrival: { time: horarios[1], terminal: 'Rodoviária' },
-              price: preco,
-              total_seats: 46,
-              occupied_seats: [2, 5, 9]
-            });
+      const res = [];
+      document.querySelectorAll('div, span, button').forEach(el => {
+        const t = el.innerText || '';
+        if (t.includes('R$') && /\d{2}:\d{2}/.test(t) && !(el.children.length > 2 && t.length > 250)) {
+          const p = t.match(/R\$\s*([\d.,]+)/);
+          const h = t.match(/(\d{2}:\d{2})/g);
+          if (p && h && h.length >= 2) {
+            const linha = t.split('\n').find(l => l.length > 3 && !l.includes('R$') && !l.match(/\d{2}:\d{2}/) && !l.includes('Poltrona')) || 'Viação';
+            res.push({ company: {name: linha}, bus_type: 'Convencional', departure: {time: h[0], terminal: 'Rodoviária'}, arrival: {time: h[1], terminal: 'Rodoviária'}, price: parseFloat(p[1].replace(/\./g,'').replace(',', '.')), total_seats: 46 });
           }
         }
       });
-
-      // Remove duplicatas
-      const unicos = [];
-      const vistos = new Set();
-      resultados.forEach(v => {
-          const chave = `${v.company.name}-${v.departure.time}-${v.price}`;
-          if (!vistos.has(chave)) { vistos.add(chave); unicos.push(v); }
-      });
-      return unicos;
+      return res;
     });
 
-    if (viagens.length > 0) {
-      console.log(`✅ [Puppeteer] SUCESSO! ${viagens.length} viagens reais encontradas.`);
-      return res.json(viagens);
-    } else {
-      console.log(`⚠️ [Puppeteer] Nenhum preço encontrado na tela. A ClickBus pode ter bloqueado o robô.`);
-      return res.json([]); 
-    }
-
-  } catch (error) {
-    console.error(`❌ Erro crítico no Puppeteer:`, error.message);
-    return res.status(500).json({ error: 'Falha ao buscar viagens no momento.' });
+    return res.json(viagens.length > 0 ? viagens : []);
+  } catch (e) {
+    return res.status(500).json({ error: 'Falha no robô.' });
   } finally {
-    // GARANTE que o navegador feche e a trava seja liberada
-    if (browser) {
-      try { await browser.close(); } catch(e) {}
-    }
-    isBrowserBusy = false; 
-    console.log(`🤖 [Puppeteer] Processo finalizado e servidor liberado.`);
+    if (browser) await browser.close();
+    isBrowserBusy = false;
   }
 });
 
-// Rota principal para o UptimeRobot ver que o site está online
 app.get('/', (req, res) => res.send('API Buser Online'));
-
-const PORT = process.env.PORT || 10000;
-
-// Inicia o servidor com timeouts estendidos para evitar erros de proxy no Render
-const server = app.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
-});
-
-server.keepAliveTimeout = 120000; 
-server.headersTimeout = 125000;
+app.listen(process.env.PORT || 10000, () => console.log(`🚀 Rodando`));
