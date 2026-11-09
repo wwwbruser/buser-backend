@@ -30,11 +30,13 @@ function encontrarArrayDeViagens(obj) {
     return melhorArray;
 }
 
+// AUMENTEI A LISTA DE POSSIBILIDADES PARA ACHAR O NOME
 function acharNomeEmpresa(v) {
     const possiveis = [
         v.company?.name, v.empresa, v.operator?.name, v.transportCompany?.name, 
         v.service?.company?.name, v.companyName, v.brand, v.carrier?.name,
-        v.trip?.company?.name, v.legs?.[0]?.company?.name, v.legs?.[0]?.operator?.name
+        v.trip?.company?.name, v.legs?.[0]?.company?.name, v.legs?.[0]?.operator?.name,
+        v.agency?.name, v.provider?.name, v.busCompany?.name, v.transportadora
     ];
     for (let nome of possiveis) {
         if (nome && typeof nome === 'string' && nome.trim().length > 2) return nome.trim();
@@ -42,7 +44,6 @@ function acharNomeEmpresa(v) {
     return 'Viação';
 }
 
-// 🕵️‍♂️ CAÇADOR DE TERMINAIS COM A TESOURA MÁGICA
 function extrairTerminalBackend(v, tipo) {
     let t = v[tipo]?.terminal || v[tipo]?.location || v[tipo]?.station || v[tipo]?.place || v[tipo]?.stop || 
             v.legs?.[0]?.[tipo]?.terminal || v.legs?.[0]?.[tipo]?.location || v.trip?.[tipo]?.terminal;
@@ -62,7 +63,6 @@ function extrairTerminalBackend(v, tipo) {
     }
 
     if (address) {
-        // ✂️ TESOURA: Remove telefone e CEP do final do endereço
         address = address.replace(/\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}/g, '');
         address = address.replace(/\d{5}-\d{3}/g, '');
         address = address.replace(/[,\-\s]+$/, '').trim();
@@ -103,6 +103,10 @@ app.get('/api/clickbus/search', async (req, res) => {
       const viagensRaw = encontrarArrayDeViagens(response.data);
 
       if (viagensRaw && viagensRaw.length > 0) {
+        // --- RAIO-X FOCADO ---
+        console.log(`🔍 [RAIO-X] Chaves da 1ª viagem:`, Object.keys(viagensRaw[0]));
+        // ---------------------
+
         console.log(`✅ [GeckoAPI] Caçador encontrou ${viagensRaw.length} viagens! Formatando...`);
         
         const viagensFormatadas = viagensRaw.map(v => {
