@@ -15,11 +15,9 @@ function slugify(text) {
 // 🕵️‍♂️ CAÇADOR DE VIAGENS: Varre o JSON inteiro e acha o array que tem os preços
 function encontrarArrayDeViagens(obj) {
     let melhorArray = [];
-    
     function varrer(o) {
         if (Array.isArray(o)) {
             if (o.length > 0 && typeof o[0] === 'object') {
-                // Se o array tem objetos que parecem viagens (têm preço ou horário ou serviceClass)
                 if (o[0].price || o[0].preco || o[0].departureTime || o[0].serviceClass || o[0].company || o[0].empresa) {
                     if (o.length > melhorArray.length) melhorArray = o;
                 }
@@ -31,6 +29,22 @@ function encontrarArrayDeViagens(obj) {
     }
     varrer(obj);
     return melhorArray;
+}
+
+// 🕵️‍♂️ CAÇADOR DE EMPRESA: Tenta achar o nome real da viação
+function acharNomeEmpresa(v) {
+    // Lista de lugares comuns onde a GeckoAPI esconde o nome
+    const possiveis = [
+        v.company?.name, v.empresa, v.operator?.name, v.transportCompany?.name, 
+        v.service?.company?.name, v.companyName, v.brand, v.carrier?.name,
+        v.trip?.company?.name, v.legs?.[0]?.company?.name, v.legs?.[0]?.operator?.name
+    ];
+    for (let nome of possiveis) {
+        if (nome && typeof nome === 'string' && nome.trim().length > 2) {
+            return nome.trim();
+        }
+    }
+    return 'Viação'; // Se não achar nada, deixa 'Viação'
 }
 
 app.get('/api/clickbus/search', async (req, res) => {
@@ -63,49 +77,46 @@ app.get('/api/clickbus/search', async (req, res) => {
         timeout: 45000
       });
 
-      // Usa o caçador
       const viagensRaw = encontrarArrayDeViagens(response.data);
 
       if (viagensRaw && viagensRaw.length > 0) {
         console.log(`✅ [GeckoAPI] Caçador encontrou ${viagensRaw.length} viagens! Formatando...`);
         
         const viagensFormatadas = viagensRaw.map(v => {
-          // Tenta achar a empresa
-          const empresa = v.company?.name || v.empresa || v.operator?.name || v.transportCompany?.name || v.service?.company?.name || v.companyName || 'Viação';
+          // 1. Chama a função que acha o nome real
+          const empresa = acharNomeEmpresa(v);
           
-          // Tenta achar o preço (olha em vários lugares possíveis)
+          // 2. Preço
           let precoRaw = v.price || v.preco || v.valor || v.ticket?.price || v.fares?.[0]?.price || v.fare?.price || v.minPrice || v.priceFrom || v.lowestPrice || 0;
           if (typeof precoRaw === 'object') precoRaw = precoRaw.amount || precoRaw.value || precoRaw.raw || 0;
-          
-          // Limpa o preço (se vier como string "R$ 150,00")
-          if (typeof precoRaw === 'string') {
-             precoRaw = precoRaw.replace(/[^\d.,]/g, '').replace(',', '.');
-          }
+          if (typeof precoRaw === 'string') precoRaw = precoRaw.replace(/[^\d.,]/g, '').replace(',', '.');
           const preco = parseFloat(precoRaw) || 0;
 
-          // Tenta achar horários
+          // 3. Horários
           const partida = v.departureTime || v.horarioSaida || v.departure?.time || v.boardingTime || v.time || '00:00';
           const chegada = v.arrivalTime || v.horarioChegada || v.arrival?.time || v.dropOffTime || '00:00';
+
+          // 4. Terminais (envia o objeto completo para o front-end extrair o endereço)
+          const termPartidaObj = v.departure?.terminal || v.departure?.location || v.departure?.station || v.departureTerminal || { name: 'Rodoviária' };
+          const termChegadaObj = v.arrival?.terminal || v.arrival?.location || v.arrival?.station || v.arrivalTerminal || { name: 'Rodoviária' };
 
           return {
             company: { name: empresa },
             bus_type: v.serviceClass?.name || v.busType || v.tipo || 'Convencional',
-            departure: { time: partida, terminal: v.departure?.terminal?.name || 'Rodoviária' },
-            arrival: { time: chegada, terminal: v.arrival?.terminal?.name || 'Rodoviária' },
+            departure: { time: partida, terminal: termPartidaObj },
+            arrival: { time: chegada, terminal: termChegadaObj },
             price: preco,
             total_seats: v.totalSeats || v.seats || 46,
             occupied_seats: [2, 5, 9]
           };
-        }).filter(v => v.price > 0); // Só aceita se tiver preço maior que zero
+        }).filter(v => v.price > 0);
 
         if (viagensFormatadas.length > 0) {
-           console.log(`✅ [GeckoAPI] SUCESSO ABSOLUTO! ${viagensFormatadas.length} viagens prontas para o site.`);
+           console.log(`✅ [GeckoAPI] SUCESSO! ${viagensFormatadas.length} viagens com nome de empresa.`);
            return res.json(viagensFormatadas);
         } else {
-           console.log(`⚠️ [GeckoAPI] Os dados vieram, mas os preços não foram reconhecidos.`);
+           console.log(`⚠️ [GeckoAPI] Preços não reconhecidos.`);
         }
-      } else {
-        console.log(`⚠️ [GeckoAPI] Nenhuma viagem retornada (Caçador não achou array válido).`);
       }
     } catch (error) {
       console.log(`❌ [GeckoAPI] Falhou: ${error.response?.status || error.message}.`);
@@ -125,7 +136,6 @@ app.get('/api/clickbus/search', async (req, res) => {
     page.on('request', (req) => { ['image', 'font', 'media'].includes(req.resourceType()) ? req.abort() : req.continue(); });
 
     const url = `https://www.clickbus.com.br/onibus/${slugify(origem.split(',')[0])}-todos/${slugify(destino.split(',')[0])}-todos?departureDate=${data}`;
-    
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await new Promise(r => setTimeout(r, 10000));
 
@@ -145,15 +155,9 @@ app.get('/api/clickbus/search', async (req, res) => {
       return res;
     });
 
-    if (viagens.length > 0) {
-      console.log(`✅ [Puppeteer] ${viagens.length} viagens encontradas.`);
-      return res.json(viagens);
-    } else {
-      console.log(`⚠️ [Puppeteer] Nenhuma viagem encontrada.`);
-      return res.json([]);
-    }
+    if (viagens.length > 0) return res.json(viagens);
+    else return res.json([]);
   } catch (e) {
-    console.error(`❌ Erro no Puppeteer:`, e.message);
     return res.status(500).json({ error: 'Falha no robô.' });
   } finally {
     if (browser) await browser.close();
