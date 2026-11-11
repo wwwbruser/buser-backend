@@ -1,81 +1,178 @@
+// ==========================================
+// SERVER.JS - BACKEND RENDER
+// ==========================================
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 
 const app = express();
-app.use(cors());
-app.use(express.json()); // Necessário para ler o JSON que o frontend envia
+const PORT = process.env.PORT || 3000;
 
+// Habilita CORS para o seu frontend (HTML) poder fazer requisições
+app.use(cors());
+app.use(express.json());
+
+// Sua chave da GekkoAPI (se precisar, configure no painel Environment do Render)
+const GEKKO_API_KEY = process.env.GEKKO_API_KEY || "SUA_CHAVE_GEKKO_AQUI";
+
+// Rota de busca
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
   if (!origem || !destino || !data) {
-    return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
-  }
-
-  // A GeckoAPI exige a separação da Cidade e do Estado (UF).
-  // O frontend envia "Imperatriz, MA". Vamos separar.
-  const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
-  const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
-
-  if (!origemCidade || !origemUF || !destinoCidade || !destinoUF) {
-    return res.status(400).json({ error: 'Formato inválido. Envie "Cidade, UF".' });
+    return res.status(400).json({ error: 'Parâmetros origem, destino e data são obrigatórios.' });
   }
 
   try {
-    const apiKey = process.env.GECKO_API_KEY;
-    if (!apiKey) {
-      console.error('❌ ERRO: Variável GECKO_API_KEY não configurada no Render!');
-      return res.status(500).json({ error: 'Chave da API não configurada no servidor.' });
-    }
-
-    // ✅ URL OFICIAL DA GECKOAPI (conforme documentação)
-    const apiUrl = 'https://api.geckoapi.com.br/v1/extract';
-
-    // ✅ CORPO DA REQUISIÇÃO (o que a GeckoAPI espera)
-    const payload = {
-      target: "clickbus.com.br",
-      type: "plp",
-      originCity: origemCidade,
-      originState: origemUF,
-      destinationCity: destinoCidade,
-      destinationState: destinoUF,
-      departureDate: data, // Formato YYYY-MM-DD (ex: 2026-11-20)
-      page: 1
-    };
-
-    const response = await fetch(apiUrl, {
-      method: 'POST', // GeckoAPI usa POST, não GET
-      headers: {
-        'Authorization': `Bearer ${apiKey}`, // Autenticação via Bearer
-        'Content-Type': 'application/json'
+    // 1. Faz a requisição para a GekkoAPI (ajuste a URL se necessário)
+    // Nota: Substitua a URL abaixo pela URL real da GekkoAPI que você usa.
+    const urlGekko = `https://api.geckoapi.com.br/v1/transport/search`;
+    
+    const response = await axios.get(urlGekko, {
+      params: {
+        origin: origem,
+        destination: destino,
+        date: data,
+        // Adicione outros parâmetros que sua API exija
       },
-      body: JSON.stringify(payload) // Converte o objeto para JSON string
+      headers: {
+        'Authorization': `Bearer ${GEKKO_API_KEY}`,
+        'Accept': 'application/json'
+      }
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Erro da GeckoAPI (${response.status}):`, errorText);
-      return res.status(response.status).json({ error: `GeckoAPI falhou com status ${response.status}` });
+    const json = response.data;
+    
+    // 2. Extrai o array de viagens (lida com vários formatos de resposta)
+    let viagensCruas = [];
+    if (Array.isArray(json)) {
+      viagensCruas = json;
+    } else if (json.data && Array.isArray(json.data)) {
+      viagensCruas = json.data;
+    } else if (json.data && json.data.data && Array.isArray(json.data.data)) {
+      viagensCruas = json.data.data;
+    } else if (json.viagens && Array.isArray(json.viagens)) {
+      viagensCruas = json.viagens;
+    } else if (json.results && Array.isArray(json.results)) {
+      viagensCruas = json.results;
     }
 
-    const dataJson = await response.json();
+    // 3. 🔥 NORMALIZAÇÃO (A MÁGICA ACONTECE AQUI)
+    const viagensFormatadas = viagensCruas.map(trip => {
+      
+      // --- NOME DA EMPRESA ---
+      const nomeEmpresa = 
+        trip.company?.name || 
+        trip.busCompany?.name || 
+        trip.operator?.name || 
+        trip.empresa?.nome || 
+        trip.empresa || 
+        (typeof trip.company === 'string' ? trip.company : null) ||
+        "Viação Padrão";
 
-    // ✅ A GeckoAPI retorna { data: { items: [...] } }.
-    // O frontend espera um array direto. Então, extraímos os itens.
-    if (dataJson && dataJson.data && dataJson.data.items) {
-      return res.json(dataJson.data.items);
-    } else {
-      // Se não houver itens (ex: data: null), retorna array vazio
-      return res.json([]);
-    }
+      // --- CIDADE DE ORIGEM ---
+      const cidadeOrigem = 
+        trip.departure?.location?.city?.name ||
+        trip.departure?.city?.name ||
+        trip.departure?.city ||
+        trip.origin?.city ||
+        origem.split(',')[0];
+
+      // --- CIDADE DE DESTINO ---
+      const cidadeDestino = 
+        trip.arrival?.location?.city?.name ||
+        trip.arrival?.city?.name ||
+        trip.arrival?.city ||
+        trip.destination?.city ||
+        destino.split(',')[0];
+
+      // --- TERMINAL DE ORIGEM ---
+      const terminalOrigem = 
+        trip.departure?.location?.name || 
+        trip.departure?.terminal?.name || 
+        trip.departure?.station?.name || 
+        trip.origin?.name || 
+        "";
+
+      // --- TERMINAL DE DESTINO ---
+      const terminalDestino = 
+        trip.arrival?.location?.name || 
+        trip.arrival?.terminal?.name || 
+        trip.arrival?.station?.name || 
+        trip.destination?.name || 
+        "";
+
+      // --- PREÇO ---
+      let preco = 0;
+      if (typeof trip.price === 'number') preco = trip.price;
+      else if (typeof trip.price === 'string') preco = parseFloat(trip.price);
+      else if (trip.price?.value) preco = parseFloat(trip.price.value);
+      else if (trip.preco) preco = parseFloat(trip.preco);
+      else if (trip.valor) preco = parseFloat(trip.valor);
+      else if (trip.amount) preco = parseFloat(trip.amount);
+
+      // --- TIPO DE ÔNIBUS ---
+      const tipoOnibus = 
+        trip.bus_type || 
+        trip.busType || 
+        trip.service_class || 
+        trip.serviceClass || 
+        trip.categoria || 
+        "Convencional";
+
+      // --- HORÁRIOS ---
+      const horaSaida = trip.departure?.time || trip.departureTime || trip.departure_time || "--:--";
+      const horaChegada = trip.arrival?.time || trip.arrivalTime || trip.arrival_time || "--:--";
+
+      // Retorna o objeto limpo para o frontend
+      return {
+        id: trip.id || Math.random().toString(36).substring(7),
+        company: {
+          name: nomeEmpresa,
+          logo: trip.company?.logo || trip.companyLogo || ""
+        },
+        bus_type: tipoOnibus,
+        price: preco,
+        total_seats: trip.total_seats || trip.totalSeats || trip.assentos || 46,
+        occupied_seats: trip.occupied_seats || trip.occupiedSeats || trip.assentos_ocupados || [],
+        departure: {
+          time: horaSaida,
+          city: cidadeOrigem,
+          terminal: {
+            name: terminalOrigem,
+            address: trip.departure?.location?.address || trip.departure?.terminal?.address || "",
+            city: cidadeOrigem
+          }
+        },
+        arrival: {
+          time: horaChegada,
+          city: cidadeDestino,
+          terminal: {
+            name: terminalDestino,
+            address: trip.arrival?.location?.address || trip.arrival?.terminal?.address || "",
+            city: cidadeDestino
+          }
+        }
+      };
+    });
+
+    // 4. Retorna os dados limpos e formatados
+    return res.json({ data: viagensFormatadas });
 
   } catch (error) {
-    console.error('❌ Erro no servidor proxy:', error.message);
-    res.status(500).json({ error: 'Erro interno no servidor ao buscar viagens.' });
+    console.error('Erro na busca:', error.message);
+    return res.status(500).json({ 
+      error: 'Erro ao buscar viagens', 
+      details: error.response?.data || error.message 
+    });
   }
 });
 
-const PORT = process.env.PORT || 10000;
+// Rota de teste para ver se o servidor está online
+app.get('/', (req, res) => {
+  res.send('API Buser Online - OK');
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
