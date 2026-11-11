@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 // ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI (Entre as aspas)
-const GEKKO_API_KEY = "COLE_SEU_TOKEN_AQUI"; 
+const GEKKO_API_KEY = "pk_live_hMefqko4aIEWJGgZpRMxXgnnpsUS9OPh"; 
 
 app.get('/', (req, res) => {
   res.send('API Buser Online - GekkoAPI Conectada');
