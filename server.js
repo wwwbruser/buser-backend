@@ -6,6 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI
 const GEKKO_API_KEY = "pk_live_hMefqko4aIEWJGgZpRMxXgnnpsUS9OPh"; 
 
 app.get('/api/clickbus/search', async (req, res) => {
@@ -35,18 +36,19 @@ app.get('/api/clickbus/search', async (req, res) => {
         let viagens = json.data?.items || json.data || [];
 
         const formatadas = viagens.map(trip => {
-            // 🔥 COMO A API NÃO MANDA O NOME, VAMOS FORÇAR UM NOME BONITO
+            // 🔥 CORREÇÃO: O nome da empresa está em travelCompany.name
             const nomeEmpresa = 
+                trip.travelCompany?.name ||   // Campo correto da GekkoAPI
                 trip.company?.name || 
-                trip.busCompany?.name || 
                 trip.empresa?.nome || 
-                trip.empresa || 
-                trip.operator?.name ||
-                "Buser Viagens"; // <- Nome padrão bonito
+                "Viação Parceira"; // Nome padrão caso não encontre
 
             return {
                 id: trip.id || Math.random().toString(),
-                company: { name: nomeEmpresa, logo: trip.company?.logo || "" },
+                company: { 
+                    name: nomeEmpresa, 
+                    logo: trip.travelCompany?.logo || trip.company?.logo || "" 
+                },
                 price: Number(trip.price || 0),
                 bus_type: trip.bus_type || "Convencional",
                 total_seats: 46,
@@ -54,12 +56,12 @@ app.get('/api/clickbus/search', async (req, res) => {
                 departure: {
                     time: trip.departure?.time || "--:--",
                     city: origemCidade,
-                    terminal: { name: trip.departure?.terminal?.name || trip.departure?.location?.name || "Terminal Principal" }
+                    terminal: { name: trip.departure?.terminal?.name || "Terminal Principal" }
                 },
                 arrival: {
                     time: trip.arrival?.time || "--:--",
                     city: destinoCidade,
-                    terminal: { name: trip.arrival?.terminal?.name || trip.arrival?.location?.name || "Terminal Principal" }
+                    terminal: { name: trip.arrival?.terminal?.name || "Terminal Principal" }
                 }
             };
         });
