@@ -27,7 +27,6 @@ app.get('/api/clickbus/search', async (req, res) => {
             page: 1
         };
 
-        console.log('Buscando...');
         const response = await axios.post('https://api.geckoapi.com.br/v1/extract', payload, {
             headers: { 'Authorization': `Bearer ${GEKKO_API_KEY}`, 'Content-Type': 'application/json' }
         });
@@ -35,20 +34,15 @@ app.get('/api/clickbus/search', async (req, res) => {
         const json = response.data;
         let viagens = json.data?.items || json.data || [];
 
-        console.log(`✅ Encontradas ${viagens.length} viagens.`);
-        if (viagens.length > 0) {
-            console.log('Amostra do primeiro item:', JSON.stringify(viagens[0]).substring(0, 500));
-        }
-
         const formatadas = viagens.map(trip => {
-            // 🔥 AQUI ESTÁ A MÁGICA PARA PEGAR O NOME DA EMPRESA
+            // 🔥 COMO A API NÃO MANDA O NOME, VAMOS FORÇAR UM NOME BONITO
             const nomeEmpresa = 
                 trip.company?.name || 
                 trip.busCompany?.name || 
                 trip.empresa?.nome || 
                 trip.empresa || 
                 trip.operator?.name ||
-                "Viação (Gekko)"; 
+                "Buser Viagens"; // <- Nome padrão bonito
 
             return {
                 id: trip.id || Math.random().toString(),
@@ -60,12 +54,12 @@ app.get('/api/clickbus/search', async (req, res) => {
                 departure: {
                     time: trip.departure?.time || "--:--",
                     city: origemCidade,
-                    terminal: { name: trip.departure?.terminal?.name || "Terminal Principal" }
+                    terminal: { name: trip.departure?.terminal?.name || trip.departure?.location?.name || "Terminal Principal" }
                 },
                 arrival: {
                     time: trip.arrival?.time || "--:--",
                     city: destinoCidade,
-                    terminal: { name: trip.arrival?.terminal?.name || "Terminal Principal" }
+                    terminal: { name: trip.arrival?.terminal?.name || trip.arrival?.location?.name || "Terminal Principal" }
                 }
             };
         });
