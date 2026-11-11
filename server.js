@@ -6,7 +6,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI
+// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI (Entre as aspas)
+// Pode ser o token que você já usava ou a chave gerada no painel da GekkoAPI.
 const GEKKO_API_KEY = "pk_live_hMefqko4aIEWJGgZpRMxXgnnpsUS9OPh"; 
 
 app.get('/', (req, res) => {
@@ -25,7 +26,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
     const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
 
-    // 2. 🔥 CORREÇÃO: Endpoint e método corretos da GekkoAPI (POST /v1/extract)
+    // 2. Requisição para o endpoint correto da GekkoAPI (POST /v1/extract)
     const response = await axios.post(
       'https://api.geckoapi.com.br/v1/extract',
       {
@@ -48,9 +49,13 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     const json = response.data;
     
-    // 3. Pega a lista de viagens (a GekkoAPI retorna dentro de data)
+    // 3. Trata a resposta (incluindo o caso de "não encontrado" da GekkoAPI)
+    // A API pode retornar { data: null, notFound: true } se não houver viagens.
     let viagens = [];
-    if (json.data && Array.isArray(json.data)) {
+    if (json.notFound === true || !json.data) {
+      console.log('GekkoAPI: Nenhuma viagem encontrada para esta rota/data.');
+      viagens = [];
+    } else if (Array.isArray(json.data)) {
       viagens = json.data;
     } else if (json.data && json.data.data && Array.isArray(json.data.data)) {
       viagens = json.data.data;
@@ -90,12 +95,16 @@ app.get('/api/clickbus/search', async (req, res) => {
       };
     });
 
+    // 5. Retorna os dados (mesmo que vazios, o frontend sabe lidar)
     res.json({ data: viagensFormatadas });
 
   } catch (error) {
-    console.error('Erro na GekkoAPI:', error.message);
-    // Se a GekkoAPI retornar erro, enviamos um array vazio para o frontend não travar
-    res.status(500).json({ error: 'Erro ao buscar viagens na Gekko', data: [] });
+    console.error('Erro na GekkoAPI:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Erro ao buscar viagens na Gekko', 
+      detalhes: error.response?.data || error.message,
+      data: [] 
+    });
   }
 });
 
