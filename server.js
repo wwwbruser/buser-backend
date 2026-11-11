@@ -3,8 +3,13 @@ const cors = require('cors');
 
 const app = express();
 
-// Habilita o CORS para o seu index.html poder fazer requisições
+// Habilita o CORS para o seu site (index.html) poder fazer requisições
 app.use(cors());
+
+// Rota de teste para ver se o servidor está de pé
+app.get('/', (req, res) => {
+  res.send('Servidor Buser Backend está rodando!');
+});
 
 // Rota que o seu index.html chama
 app.get('/api/clickbus/search', async (req, res) => {
@@ -15,22 +20,22 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // Pega a chave que está configurada no painel Environment do Render
+    // Pega a chave que está no painel Environment do Render
     const apiKey = process.env.GECKO_API_KEY;
     
     if (!apiKey) {
-      console.warn('⚠️ GECKO_API_KEY não configurada nas variáveis de ambiente!');
+      console.error('❌ ERRO: Variável GECKO_API_KEY não configurada no Render!');
+      return res.status(500).json({ error: 'Chave da API não configurada no servidor.' });
     }
 
     // ⚠️ SUBSTITUA A URL ABAIXO PELA URL REAL DA SUA API (GeckoAPI / ClickBus)
-    // Exemplo genérico:
+    // Exemplo genérico (confirme na documentação do provedor):
     const apiUrl = `https://api.geckoapi.com/v1/bus/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
 
-    // Faz a requisição para a API externa
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`, // ou 'x-api-key': apiKey, depende da GeckoAPI
+        'Authorization': `Bearer ${apiKey}`, // ou 'x-api-key': apiKey, depende da API
         'Content-Type': 'application/json'
       }
     });
@@ -40,7 +45,6 @@ app.get('/api/clickbus/search', async (req, res) => {
       return res.status(response.status).json({ error: `API externa falhou com status ${response.status}` });
     }
 
-    // Converte a resposta para JSON e devolve para o frontend
     const dataJson = await response.json();
     res.json(dataJson);
 
