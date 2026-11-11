@@ -56,18 +56,23 @@ app.get('/api/clickbus/search', async (req, res) => {
         trip.busCompany?.name || 
         "Viação Parceira";
 
-      // 🔥 LÓGICA DAS POLTRONAS OCUPADAS (35%)
+      // 🔥 AQUI ESTÁ A ALEATORIEDADE DAS POLTRONAS
       const totalAssentos = 46;
       const qtdOcupadas = Math.floor(totalAssentos * 0.35); // 35% de 46 = 16 poltronas
+      const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
       const ocupadas = [];
-      
-      // Sorteia as poltronas baseado no ID da viagem (para ser fixo por viagem)
-      const seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      for (let i = 1; i <= totalAssentos; i++) {
-        if ((i * seed) % 10 < 3.5) { 
-          ocupadas.push(i);
-        }
+
+      // Embaralha o array de poltronas usando o ID da viagem (para ser determinístico)
+      // Assim, a mesma viagem sempre terá as mesmas poltronas ocupadas.
+      let seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      for (let i = todasPoltronas.length - 1; i > 0; i--) {
+        seed = (seed * 9301 + 49297) % 233280;
+        const j = Math.floor((seed / 233280) * (i + 1));
+        [todasPoltronas[i], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[i]];
       }
+
+      // Pega as primeiras "qtdOcupadas" poltronas do array embaralhado
+      ocupadas.push(...todasPoltronas.slice(0, qtdOcupadas));
 
       return {
         id: trip.id || Math.random().toString(),
@@ -78,7 +83,7 @@ app.get('/api/clickbus/search', async (req, res) => {
         price: Number(trip.price || trip.preco || 0),
         bus_type: trip.bus_type || "Convencional",
         total_seats: totalAssentos,
-        occupied_seats: ocupadas.slice(0, qtdOcupadas), // Envia as poltronas para o Frontend
+        occupied_seats: ocupadas, // Envia as poltronas aleatórias para o Frontend
         departure: {
           time: trip.departure?.time || "--:--",
           city: origemCidade,
