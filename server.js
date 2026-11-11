@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI (Entre as aspas)
+// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI
 const GEKKO_API_KEY = "pk_live_hMefqko4aIEWJGgZpRMxXgnnpsUS9OPh"; 
 
 app.get('/', (req, res) => {
@@ -17,34 +17,48 @@ app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
   if (!origem || !destino || !data) {
-    return res.status(400).json({ error: 'Faltando parâmetros.' });
+    return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
   }
 
   try {
-    // 1. Requisição para a GekkoAPI
-    // (A URL abaixo é o endpoint padrão da Gekko para ônibus)
-    const response = await axios.get('https://api.geckoapi.com.br/v1/transport/search', {
-      params: {
-        origin: origem,
-        destination: destino,
-        date: data
+    // 1. Separa a cidade e o estado (UF) da string "São Paulo, SP"
+    const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
+    const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
+
+    // 2. 🔥 CORREÇÃO: Endpoint e método corretos da GekkoAPI (POST /v1/extract)
+    const response = await axios.post(
+      'https://api.geckoapi.com.br/v1/extract',
+      {
+        target: 'clickbus.com.br',
+        type: 'plp',
+        originCity: origemCidade,
+        originState: origemUF,
+        destinationCity: destinoCidade,
+        destinationState: destinoUF,
+        departureDate: data, // Formato YYYY-MM-DD
+        page: 1
       },
-      headers: {
-        'Authorization': `Bearer ${GEKKO_API_KEY}`, // O Token entra aqui
-        'Accept': 'application/json'
+      {
+        headers: {
+          'Authorization': `Bearer ${GEKKO_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
       }
-    });
+    );
 
     const json = response.data;
     
-    // 2. Pega a lista de viagens
-    let viagens = json.data || json.results || json.viagens || json;
-    if (!Array.isArray(viagens)) viagens = [];
+    // 3. Pega a lista de viagens (a GekkoAPI retorna dentro de data)
+    let viagens = [];
+    if (json.data && Array.isArray(json.data)) {
+      viagens = json.data;
+    } else if (json.data && json.data.data && Array.isArray(json.data.data)) {
+      viagens = json.data.data;
+    }
 
-    // 3. Formata os dados para o Frontend (A Mágica)
+    // 4. Formata os dados para o Frontend
     const viagensFormatadas = viagens.map(trip => {
       
-      // Procura o nome da empresa em todos os lugares possíveis da GekkoAPI
       const nomeEmpresa = 
         trip.company?.name || 
         trip.busCompany?.name || 
@@ -65,12 +79,12 @@ app.get('/api/clickbus/search', async (req, res) => {
         occupied_seats: trip.occupied_seats || [],
         departure: {
           time: trip.departure?.time || trip.saida || "00:00",
-          city: origem.split(',')[0],
+          city: origemCidade,
           terminal: { name: trip.departure?.terminal?.name || trip.departure?.location?.name || "Terminal Principal" }
         },
         arrival: {
           time: trip.arrival?.time || trip.chegada || "00:00",
-          city: destino.split(',')[0],
+          city: destinoCidade,
           terminal: { name: trip.arrival?.terminal?.name || trip.arrival?.location?.name || "Terminal Principal" }
         }
       };
@@ -80,6 +94,7 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     console.error('Erro na GekkoAPI:', error.message);
+    // Se a GekkoAPI retornar erro, enviamos um array vazio para o frontend não travar
     res.status(500).json({ error: 'Erro ao buscar viagens na Gekko', data: [] });
   }
 });
