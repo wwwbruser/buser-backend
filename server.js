@@ -24,17 +24,17 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // 1. Separa a cidade e o estado (Ex: "São Paulo, SP" vira "São Paulo" e "SP")
+    // 1. Separa a cidade e o estado (Ex: "São Paulo, SP" vira "Sao Paulo" e "SP")
+    // Removemos acentos da cidade para evitar erro na API
     const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
     const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
 
-    // 2. Monta os parâmetros exatos que a GekkoAPI exige
     const payload = {
       target: 'clickbus.com.br',
       type: 'plp',
-      originCity: origemCidade,
+      originCity: origemCidade.normalize("NFD").replace(/[\u0300-\u036f]/g, ""), // "Sao Paulo"
       originState: origemUF,
-      destinationCity: destinoCidade,
+      destinationCity: destinoCidade.normalize("NFD").replace(/[\u0300-\u036f]/g, ""), // "Salvador"
       destinationState: destinoUF,
       departureDate: data,
       page: 1
@@ -42,7 +42,6 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     console.log('Enviando para GekkoAPI:', JSON.stringify(payload));
 
-    // 3. Faz a requisição para a GekkoAPI
     const response = await axios.post(
       'https://api.geckoapi.com.br/v1/extract',
       payload,
@@ -55,26 +54,32 @@ app.get('/api/clickbus/search', async (req, res) => {
     );
 
     const json = response.data;
-    console.log('Resposta bruta da GekkoAPI recebida.');
 
-    // 4. Verifica se a GekkoAPI encontrou viagens
-    if (json.notFound === true || !json.data || (Array.isArray(json.data) && json.data.length === 0)) {
-      console.log('⚠️ GekkoAPI respondeu, mas não encontrou viagens para esta data/rota.');
+    // 2. Verifica se a GekkoAPI realmente não achou nada
+    if (json.notFound === true || !json.data) {
+      console.log('⚠️ GekkoAPI respondeu que não encontrou a rota (notFound: true).');
       return res.json({ data: [] });
     }
 
+    // 3. Tenta extrair as viagens
     let viagens = [];
     if (Array.isArray(json.data)) {
       viagens = json.data;
+    } else if (json.data && json.data.items) {
+      viagens = json.data.items; // Formato comum da GekkoAPI
     } else if (json.data && json.data.data) {
-      viagens = json.data.data; 
+      viagens = json.data.data;
     }
 
     console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
 
-    // 5. Formata os dados para o seu HTML
+    if (viagens.length === 0) {
+      console.log('⚠️ A API retornou sucesso, mas a lista de viagens está vazia.');
+      return res.json({ data: [] });
+    }
+
+    // 4. Formata os dados
     const viagensFormatadas = viagens.map(trip => {
-      
       const nomeEmpresa = 
         trip.company?.name || 
         trip.busCompany?.name || 
