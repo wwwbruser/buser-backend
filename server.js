@@ -21,14 +21,9 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // Separa a cidade e o estado (Ex: "São Paulo, SP" vira "São Paulo" e "SP")
     const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
     const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
 
-    console.log(`\n--- BUSCA ---`);
-    console.log(`Origem: ${origemCidade}-${origemUF} | Destino: ${destinoCidade}-${destinoUF} | Data: ${data}`);
-
-    // Requisição para a GekkoAPI
     const response = await axios.post(
       'https://api.geckoapi.com.br/v1/extract',
       {
@@ -50,52 +45,29 @@ app.get('/api/clickbus/search', async (req, res) => {
     );
 
     const json = response.data;
-    
-    // Verifica se a API achou viagens
     let viagens = [];
-    if (json.data && Array.isArray(json.data)) {
-      viagens = json.data;
-    } else if (json.data && json.data.items) {
-      viagens = json.data.items;
-    }
+    if (json.data && Array.isArray(json.data)) viagens = json.data;
+    else if (json.data && json.data.items) viagens = json.data.items;
 
-    console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
-
-    if (viagens.length === 0) {
-      return res.json({ data: [] });
-    }
-
-    // Formata os dados para o seu Frontend
     const viagensFormatadas = viagens.map(trip => {
-      
-      // 🔥 AQUI ESTÁ O SEGREDO DO NOME DA EMPRESA
       const nomeEmpresa = 
         trip.travelCompany?.name || 
         trip.company?.name || 
         trip.busCompany?.name || 
         "Viação Parceira";
 
-      // 🔥 AQUI ESTÁ O SEGREDO DO NOME DA RODOVIÁRIA
-      const terminalOrigemName = 
-        trip.departure?.place?.name || 
-        trip.departure?.terminal?.name || 
-        "Terminal Principal";
-
-      const terminalDestinoName = 
-        trip.arrival?.place?.name || 
-        trip.arrival?.terminal?.name || 
-        "Terminal Principal";
-
-      // Tenta pegar o endereço (se existir)
-      const enderecoOrigem = 
-        trip.departure?.place?.address || 
-        trip.departure?.terminal?.address || 
-        "";
+      // 🔥 LÓGICA DAS POLTRONAS OCUPADAS (35%)
+      const totalAssentos = 46;
+      const qtdOcupadas = Math.floor(totalAssentos * 0.35); // 35% de 46 = 16 poltronas
+      const ocupadas = [];
       
-      const enderecoDestino = 
-        trip.arrival?.place?.address || 
-        trip.arrival?.terminal?.address || 
-        "";
+      // Sorteia as poltronas baseado no ID da viagem (para ser fixo por viagem)
+      const seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      for (let i = 1; i <= totalAssentos; i++) {
+        if ((i * seed) % 10 < 3.5) { 
+          ocupadas.push(i);
+        }
+      }
 
       return {
         id: trip.id || Math.random().toString(),
@@ -105,22 +77,22 @@ app.get('/api/clickbus/search', async (req, res) => {
         },
         price: Number(trip.price || trip.preco || 0),
         bus_type: trip.bus_type || "Convencional",
-        total_seats: 46,
-        occupied_seats: [],
+        total_seats: totalAssentos,
+        occupied_seats: ocupadas.slice(0, qtdOcupadas), // Envia as poltronas para o Frontend
         departure: {
           time: trip.departure?.time || "--:--",
           city: origemCidade,
           terminal: { 
-            name: terminalOrigemName, 
-            address: enderecoOrigem 
+            name: trip.departure?.place?.name || trip.departure?.terminal?.name || "Terminal Principal", 
+            address: trip.departure?.place?.address || "" 
           }
         },
         arrival: {
           time: trip.arrival?.time || "--:--",
           city: destinoCidade,
           terminal: { 
-            name: terminalDestinoName, 
-            address: enderecoDestino 
+            name: trip.arrival?.place?.name || trip.arrival?.terminal?.name || "Terminal Principal", 
+            address: trip.arrival?.place?.address || "" 
           }
         }
       };
@@ -130,11 +102,7 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     console.error('❌ ERRO NA GEKKOAPI:', error.response?.data || error.message);
-    res.status(500).json({ 
-      error: 'Erro ao buscar viagens', 
-      detalhes: error.response?.data || error.message,
-      data: [] 
-    });
+    res.status(500).json({ error: 'Erro ao buscar viagens', data: [] });
   }
 });
 
