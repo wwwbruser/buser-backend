@@ -2,16 +2,9 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-
-// Habilita o CORS para o seu site (index.html) poder fazer requisições
 app.use(cors());
+app.use(express.json()); // Necessário para ler o JSON que o frontend envia
 
-// Rota de teste para ver se o servidor está de pé
-app.get('/', (req, res) => {
-  res.send('Servidor Buser Backend está rodando!');
-});
-
-// Rota que o seu index.html chama
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
@@ -19,34 +12,62 @@ app.get('/api/clickbus/search', async (req, res) => {
     return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
   }
 
+  // A GeckoAPI exige a separação da Cidade e do Estado (UF).
+  // O frontend envia "Imperatriz, MA". Vamos separar.
+  const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
+  const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
+
+  if (!origemCidade || !origemUF || !destinoCidade || !destinoUF) {
+    return res.status(400).json({ error: 'Formato inválido. Envie "Cidade, UF".' });
+  }
+
   try {
-    // Pega a chave que está no painel Environment do Render
     const apiKey = process.env.GECKO_API_KEY;
-    
     if (!apiKey) {
       console.error('❌ ERRO: Variável GECKO_API_KEY não configurada no Render!');
       return res.status(500).json({ error: 'Chave da API não configurada no servidor.' });
     }
 
-    // ⚠️ SUBSTITUA A URL ABAIXO PELA URL REAL DA SUA API (GeckoAPI / ClickBus)
-    // Exemplo genérico (confirme na documentação do provedor):
-    const apiUrl = `https://api.geckoapi.com/v1/bus/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
+    // ✅ URL OFICIAL DA GECKOAPI (conforme documentação)
+    const apiUrl = 'https://api.geckoapi.com.br/v1/extract';
+
+    // ✅ CORPO DA REQUISIÇÃO (o que a GeckoAPI espera)
+    const payload = {
+      target: "clickbus.com.br",
+      type: "plp",
+      originCity: origemCidade,
+      originState: origemUF,
+      destinationCity: destinoCidade,
+      destinationState: destinoUF,
+      departureDate: data, // Formato YYYY-MM-DD (ex: 2026-11-20)
+      page: 1
+    };
 
     const response = await fetch(apiUrl, {
-      method: 'GET',
+      method: 'POST', // GeckoAPI usa POST, não GET
       headers: {
-        'Authorization': `Bearer ${apiKey}`, // ou 'x-api-key': apiKey, depende da API
+        'Authorization': `Bearer ${apiKey}`, // Autenticação via Bearer
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify(payload) // Converte o objeto para JSON string
     });
 
     if (!response.ok) {
-      console.error(`❌ Erro da API externa: Status ${response.status}`);
-      return res.status(response.status).json({ error: `API externa falhou com status ${response.status}` });
+      const errorText = await response.text();
+      console.error(`❌ Erro da GeckoAPI (${response.status}):`, errorText);
+      return res.status(response.status).json({ error: `GeckoAPI falhou com status ${response.status}` });
     }
 
     const dataJson = await response.json();
-    res.json(dataJson);
+
+    // ✅ A GeckoAPI retorna { data: { items: [...] } }.
+    // O frontend espera um array direto. Então, extraímos os itens.
+    if (dataJson && dataJson.data && dataJson.data.items) {
+      return res.json(dataJson.data.items);
+    } else {
+      // Se não houver itens (ex: data: null), retorna array vazio
+      return res.json([]);
+    }
 
   } catch (error) {
     console.error('❌ Erro no servidor proxy:', error.message);
@@ -54,8 +75,7 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 });
 
-// Porta exigida pelo Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor backend rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
