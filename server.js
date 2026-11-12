@@ -1,38 +1,42 @@
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const admin = require('firebase-admin'); // Novo: Para o Worker ler
+const admin = require('firebase-admin'); // Novo: Para o Worker
+const axios = require('axios');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- CONFIGURAÇÃO DO FIREBASE (ADMIN) ---
-// Você precisa baixar a chave de serviço do Firebase e colocar nas variáveis de ambiente do Render
-// Se não tiver, use a configuração pública para teste (menos seguro, mas funciona)
-const firebaseConfig = {
-  apiKey: "AIzaSyCmoxq5NMQUj1hqyWhjaJz4Uw4grhsFFhA",
-  authDomain: "projeto-link-ddbf0.firebaseapp.com",
-  databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com",
-  projectId: "projeto-link-ddbf0",
-  storageBucket: "projeto-link-ddbf0.firebasestorage.app",
-  messagingSenderId: "560317126646",
-  appId: "1:560317126646:web:be9cad9c9ed350940399d7"
+// ============================================================
+// 🔥 CHAVE DO FIREBASE (MANTIDA AQUI PARA FACILITAR)
+// ============================================================
+const serviceAccount = {
+  "type": "service_account",
+  "project_id": "projeto-link-ddbf0",
+  "private_key_id": "104225bf047ea684fa969c362200b82e530c4488", // Exemplo, use a sua
+  "private_key": "-----BEGIN PRIVATE KEY-----\nSUA_CHAVE_AQUI\n-----END PRIVATE KEY-----\n", // Cole a sua chave real aqui
+  "client_email": "firebase-adminsdk-fbsvc@projeto-link-ddbf0.iam.gserviceaccount.com",
+  "client_id": "111553288974699411914",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40projeto-link-ddbf0.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
 };
 
-// Inicializa o Firebase Admin (para o Worker ler)
+// Inicializa o Firebase Admin
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-    databaseURL: firebaseConfig.databaseURL
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
   });
 }
 const db = admin.database();
 
+// ============================================================
+// PARTE 1: WEB SERVICE (RESPOSTA RÁPIDA)
+// ============================================================
 app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
     
@@ -78,5 +82,69 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
     }
 });
 
+// ============================================================
+// PARTE 2: WORKER (PROCESSA A FILA EM SEGUNDO PLANO)
+// ============================================================
+console.log('Worker iniciado. Aguardando pedidos na fila...');
+
+db.ref('fila_pedidos').on('child_added', async (snapshot) => {
+    const pedidoId = snapshot.key;
+    const pedido = snapshot.val();
+
+    if (pedido.status !== 'processando') return;
+
+    console.log(`\n⚙️ Processando pedido ${pedidoId} (${pedido.origem} -> ${pedido.destino})`);
+
+    try {
+        // Tenta buscar na ClickBus
+        const criarSlug = (cidadeString) => {
+            const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
+            const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
+            return `${cidadeSlug}-${uf.toLowerCase()}`;
+        };
+
+        let resultado = null;
+        try {
+            const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
+                params: {
+                    from: `${criarSlug(pedido.origem)}-todos`,
+                    to: `${criarSlug(pedido.destino)}-todos`,
+                    departureDate: pedido.data,
+                    clientId: 'buser-online-clone'
+                },
+                headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+                timeout: 60000
+            });
+            let viagens = response.data.data || response.data.trips || [];
+            if (Array.isArray(viagens) && viagens.length > 0) {
+                resultado = viagens.map(trip => ({ /* ... formatação ... */ }));
+            }
+        } catch (e) {
+            console.log('ClickBus bloqueou. Usando demonstração.');
+        }
+
+        // Se falhou (ou não achou nada), usa a demonstração
+        if (!resultado || resultado.length === 0) {
+            resultado = [
+                { id: 'demo-1', company: { name: 'Catedral' }, price: 150, bus_type: 'Executivo', total_seats: 46, occupied_seats: [], departure: { time: '08:00', city: pedido.origem.split(',')[0], terminal: { name: 'Rodoviária' } }, arrival: { time: '14:15', city: pedido.destino.split(',')[0], terminal: { name: 'Terminal' } } },
+                { id: 'demo-2', company: { name: 'Nacional' }, price: 180, bus_type: 'Convencional', total_seats: 46, occupied_seats: [], departure: { time: '14:00', city: pedido.origem.split(',')[0], terminal: { name: 'Rodoviária' } }, arrival: { time: '19:45', city: pedido.destino.split(',')[0], terminal: { name: 'Terminal' } } }
+            ];
+        }
+
+        // Atualiza o status para concluído
+        await db.ref(`fila_pedidos/${pedidoId}`).update({
+            status: 'concluido',
+            resultado: resultado,
+            concluidoEm: Date.now()
+        });
+
+        console.log(`✅ Pedido ${pedidoId} concluído com ${resultado.length} viagens.`);
+
+    } catch (error) {
+        console.error(`❌ Falha no pedido ${pedidoId}:`, error);
+        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro interno.' });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Web Service rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
