@@ -2,12 +2,11 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 
-// 1. AQUI ESTÁ O QUE FALTAVA: A CRIAÇÃO DO APP
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste para ver se o servidor está no ar
+// Rota de teste
 app.get('/', (req, res) => {
   res.send('API Buser Online - ClickBus Conectada');
 });
@@ -21,7 +20,7 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // Transforma "São Paulo, SP" em "sao-paulo-sp"
+    // 1. Transforma "São Paulo, SP" em "sao-paulo-sp"
     const criarSlug = (cidadeString) => {
       const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
       const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
@@ -34,7 +33,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     console.log(`\n--- BUSCA CLICKBUS ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
-    // Chamada direta para a API da ClickBus
+    // 2. Chamada direta para a API da ClickBus
     const response = await axios.get('https://api.clickbus.com/api/v4/trips', {
       params: {
         from: `${origemSlug}-todos`,
@@ -54,11 +53,11 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
 
-    // Formata os dados para o seu Frontend
+    // 3. Formata os dados para o Frontend
     const viagensFormatadas = viagens.map(trip => {
       const nomeEmpresa = trip.company?.name || trip.travelCompany?.name || "Viação Parceira";
       
-      // Lógica das poltronas aleatórias (35%)
+      // 🔥 Lógica das poltronas aleatórias (35%)
       const totalAssentos = 46;
       const qtdOcupadas = Math.floor(totalAssentos * 0.35);
       const ocupadas = [];
