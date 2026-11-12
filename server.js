@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste
+// Rota de teste para ver se o servidor está online
 app.get('/', (req, res) => {
   res.send('API Buser Online - ClickBus Conectada');
 });
