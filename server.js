@@ -6,12 +6,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔑 SUA CHAVE DE API DO SCRAPERAPI (pega no painel)
+// 🔑 SUA CHAVE DE API DO SCRAPERAPI
 const SCRAPER_API_KEY = "d793e70f21a22967eacd95419029258e";
 
 // Rota de teste
 app.get('/', (req, res) => {
-  res.send('API Buser Online - ScraperAPI Conectada');
+  res.send('API Buser Online - ScraperAPI (Força Máxima)');
 });
 
 // Rota principal de busca
@@ -32,30 +32,34 @@ app.get('/api/clickbus/search', async (req, res) => {
     const origemSlug = criarSlug(origem);
     const destinoSlug = criarSlug(destino);
 
-    console.log(`\n--- BUSCA CLICKBUS (via ScraperAPI) ---`);
+    console.log(`\n--- BUSCA CLICKBUS (ScraperAPI - Força Máxima) ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
     // URL da API da ClickBus que queremos acessar
     const clickbusUrl = 'https://api.clickbus.com/api/v5/trips';
     
-    // Chamada para o ScraperAPI, que vai acessar a ClickBus por nós
+    // Chamada para o ScraperAPI com todos os parâmetros de força
     const response = await axios.get('https://api.scraperapi.com', {
       params: {
         api_key: SCRAPER_API_KEY,
         url: clickbusUrl,
-        // Parâmetros que a ClickBus espera (enviados como query string)
+        // Parâmetros da ClickBus (enviados como query string)
         from: `${origemSlug}-todos`,
         to: `${destinoSlug}-todos`,
         departureDate: data,
         clientId: 'buser-online-clone',
-        // Parâmetros do ScraperAPI para melhorar a taxa de sucesso
-        country_code: 'br', // Usar proxies do Brasil (importante para a ClickBus)
-        keep_headers: 'true' // Manter os headers que enviamos
+        
+        // 🔥 FORÇA MÁXIMA:
+        country_code: 'br', // Usar IPs do Brasil
+        premium: 'true',    // Usar proxies residenciais (mais caro, mas passa bloqueios)
+        render: 'true',     // Renderizar JS (caso a API dependa de JS)
+        keep_headers: 'true'// Manter headers originais
       },
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
+      },
+      timeout: 60000 // Aumenta o timeout do Axios para 60 segundos
     });
 
     // O ScraperAPI retorna o conteúdo como string, então precisamos converter para JSON
@@ -63,8 +67,8 @@ app.get('/api/clickbus/search', async (req, res) => {
     try {
       json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
     } catch (e) {
-      console.error('❌ ScraperAPI retornou algo que não é JSON:', response.data.substring(0, 200));
-      throw new Error('Resposta inválida do ScraperAPI');
+      console.error('❌ ScraperAPI retornou algo que não é JSON:', response.data.substring(0, 500));
+      throw new Error('Resposta inválida do ScraperAPI (não é JSON)');
     }
 
     let viagens = json.data || json.trips || [];
