@@ -6,9 +6,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 🔑 SUA CHAVE DE API DO SCRAPERAPI (pega no painel)
+const SCRAPER_API_KEY = "d793e70f21a22967eacd95419029258e";
+
 // Rota de teste
 app.get('/', (req, res) => {
-  res.send('API Buser Online - ClickBus v5 Conectada');
+  res.send('API Buser Online - ScraperAPI Conectada');
 });
 
 // Rota principal de busca
@@ -20,7 +23,6 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // 1. Transforma "São Paulo, SP" em "sao-paulo-sp"
     const criarSlug = (cidadeString) => {
       const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
       const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
@@ -30,16 +32,25 @@ app.get('/api/clickbus/search', async (req, res) => {
     const origemSlug = criarSlug(origem);
     const destinoSlug = criarSlug(destino);
 
-    console.log(`\n--- BUSCA CLICKBUS (v5) ---`);
+    console.log(`\n--- BUSCA CLICKBUS (via ScraperAPI) ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
-    // 2. Chamada para a API v5 da ClickBus
-    const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
+    // URL da API da ClickBus que queremos acessar
+    const clickbusUrl = 'https://api.clickbus.com/api/v5/trips';
+    
+    // Chamada para o ScraperAPI, que vai acessar a ClickBus por nós
+    const response = await axios.get('https://api.scraperapi.com', {
       params: {
+        api_key: SCRAPER_API_KEY,
+        url: clickbusUrl,
+        // Parâmetros que a ClickBus espera (enviados como query string)
         from: `${origemSlug}-todos`,
         to: `${destinoSlug}-todos`,
         departureDate: data,
-        clientId: 'buser-online-clone'
+        clientId: 'buser-online-clone',
+        // Parâmetros do ScraperAPI para melhorar a taxa de sucesso
+        country_code: 'br', // Usar proxies do Brasil (importante para a ClickBus)
+        keep_headers: 'true' // Manter os headers que enviamos
       },
       headers: {
         'Accept': 'application/json',
@@ -47,19 +58,25 @@ app.get('/api/clickbus/search', async (req, res) => {
       }
     });
 
-    const json = response.data;
-    
-    // A API v5 retorna a lista dentro de "data"
+    // O ScraperAPI retorna o conteúdo como string, então precisamos converter para JSON
+    let json;
+    try {
+      json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+    } catch (e) {
+      console.error('❌ ScraperAPI retornou algo que não é JSON:', response.data.substring(0, 200));
+      throw new Error('Resposta inválida do ScraperAPI');
+    }
+
     let viagens = json.data || json.trips || [];
     if (!Array.isArray(viagens)) viagens = [];
 
     console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
 
-    // 3. Formata os dados para o Frontend
+    // Formata os dados para o Frontend
     const viagensFormatadas = viagens.map(trip => {
       const nomeEmpresa = trip.company?.name || trip.travelCompany?.name || "Viação Parceira";
       
-      // 🔥 Lógica das poltronas aleatórias (35%)
+      // Lógica das poltronas aleatórias (35%)
       const totalAssentos = 46;
       const qtdOcupadas = Math.floor(totalAssentos * 0.35);
       const ocupadas = [];
@@ -100,7 +117,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     res.json({ data: viagensFormatadas });
 
   } catch (error) {
-    console.error('❌ ERRO NA CLICKBUS (v5):', error.response?.data || error.message);
+    console.error('❌ ERRO NA BUSCA (ScraperAPI):', error.response?.data || error.message);
     res.status(500).json({ 
       error: 'Erro ao buscar viagens', 
       detalhes: error.response?.data || error.message,
