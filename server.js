@@ -6,9 +6,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste para ver se o servidor está online
+// Rota de teste
 app.get('/', (req, res) => {
-  res.send('API Buser Online - ClickBus Conectada');
+  res.send('API Buser Online - ClickBus v5 Conectada');
 });
 
 // Rota principal de busca
@@ -30,11 +30,11 @@ app.get('/api/clickbus/search', async (req, res) => {
     const origemSlug = criarSlug(origem);
     const destinoSlug = criarSlug(destino);
 
-    console.log(`\n--- BUSCA CLICKBUS ---`);
+    console.log(`\n--- BUSCA CLICKBUS (v5) ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
-    // 2. Chamada direta para a API da ClickBus
-    const response = await axios.get('https://api.clickbus.com/api/v4/trips', {
+    // 2. Chamada para a API v5 da ClickBus
+    const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
       params: {
         from: `${origemSlug}-todos`,
         to: `${destinoSlug}-todos`,
@@ -48,6 +48,8 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
 
     const json = response.data;
+    
+    // A API v5 retorna a lista dentro de "data"
     let viagens = json.data || json.trips || [];
     if (!Array.isArray(viagens)) viagens = [];
 
@@ -98,7 +100,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     res.json({ data: viagensFormatadas });
 
   } catch (error) {
-    console.error('❌ ERRO NA CLICKBUS:', error.response?.data || error.message);
+    console.error('❌ ERRO NA CLICKBUS (v5):', error.response?.data || error.message);
     res.status(500).json({ 
       error: 'Erro ao buscar viagens', 
       detalhes: error.response?.data || error.message,
