@@ -15,7 +15,15 @@ const serviceAccount = {
   "type": "service_account",
   "project_id": "projeto-link-ddbf0",
   "private_key_id": "104225bf047ea684fa969c362200b82e530c4488", // Exemplo, use a sua
-  "private_key": "-----BEGIN PRIVATE KEY-----\nSUA_CHAVE_AQUI\n-----END PRIVATE KEY-----\n", // Cole a sua chave real aqui
+  "private_key": "-----BEGIN PRIVATE KEY-----\nSUA_CHAVE_AQUI\n-----var admin = require("firebase-admin");
+
+var serviceAccount = require("path/to/serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
+});
+-----\n", // Cole a sua chave real aqui
   "client_email": "firebase-adminsdk-fbsvc@projeto-link-ddbf0.iam.gserviceaccount.com",
   "client_id": "111553288974699411914",
   "auth_uri": "https://accounts.google.com/o/oauth2/auth",
