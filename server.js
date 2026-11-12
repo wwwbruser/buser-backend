@@ -1,3 +1,18 @@
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+
+// 1. AQUI ESTÁ O QUE FALTAVA: A CRIAÇÃO DO APP
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Rota de teste para ver se o servidor está no ar
+app.get('/', (req, res) => {
+  res.send('API Buser Online - ClickBus Conectada');
+});
+
+// Rota principal de busca
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
@@ -6,7 +21,7 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    // 1. Transforma "São Paulo, SP" em "sao-paulo-sp"
+    // Transforma "São Paulo, SP" em "sao-paulo-sp"
     const criarSlug = (cidadeString) => {
       const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
       const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
@@ -19,13 +34,13 @@ app.get('/api/clickbus/search', async (req, res) => {
     console.log(`\n--- BUSCA CLICKBUS ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
-    // 2. Chamada direta para a API da ClickBus (sem token)
+    // Chamada direta para a API da ClickBus
     const response = await axios.get('https://api.clickbus.com/api/v4/trips', {
       params: {
-        from: `${origemSlug}-todos`, // O "-todos" é o padrão da ClickBus
+        from: `${origemSlug}-todos`,
         to: `${destinoSlug}-todos`,
         departureDate: data,
-        clientId: 'buser-online-clone' // Um identificador qualquer
+        clientId: 'buser-online-clone'
       },
       headers: {
         'Accept': 'application/json',
@@ -34,19 +49,16 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
 
     const json = response.data;
-
-    // 3. A ClickBus costuma retornar os itens em "data" ou "trips"
     let viagens = json.data || json.trips || [];
     if (!Array.isArray(viagens)) viagens = [];
 
     console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
 
-    // 4. Formata os dados para o seu Frontend
+    // Formata os dados para o seu Frontend
     const viagensFormatadas = viagens.map(trip => {
-      // A ClickBus usa "company" ou "travelCompany"
       const nomeEmpresa = trip.company?.name || trip.travelCompany?.name || "Viação Parceira";
       
-      // 🔥 MANTENDO A LÓGICA DAS POLTRONAS ALEATÓRIAS (35%)
+      // Lógica das poltronas aleatórias (35%)
       const totalAssentos = 46;
       const qtdOcupadas = Math.floor(totalAssentos * 0.35);
       const ocupadas = [];
@@ -94,4 +106,10 @@ app.get('/api/clickbus/search', async (req, res) => {
       data: [] 
     });
   }
+});
+
+// Inicialização do Servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
