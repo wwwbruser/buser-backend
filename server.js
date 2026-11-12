@@ -1,18 +1,3 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// ⚠️ COLOQUE O SEU TOKEN DA GEKKOAPI AQUI
-const GEKKO_API_KEY = "pk_live_IigOgQi7WIKJsTdtOkripDvJPCZ2F9wQ"; 
-
-app.get('/', (req, res) => {
-  res.send('API Buser Online - GekkoAPI Conectada');
-});
-
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
@@ -21,83 +6,79 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 
   try {
-    const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
-    const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
+    // 1. Transforma "São Paulo, SP" em "sao-paulo-sp"
+    const criarSlug = (cidadeString) => {
+      const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
+      const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
+      return `${cidadeSlug}-${uf.toLowerCase()}`;
+    };
 
-    const response = await axios.post(
-      'https://api.geckoapi.com.br/v1/extract',
-      {
-        target: 'clickbus.com.br',
-        type: 'plp',
-        originCity: origemCidade,
-        originState: origemUF,
-        destinationCity: destinoCidade,
-        destinationState: destinoUF,
+    const origemSlug = criarSlug(origem);
+    const destinoSlug = criarSlug(destino);
+
+    console.log(`\n--- BUSCA CLICKBUS ---`);
+    console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
+
+    // 2. Chamada direta para a API da ClickBus (sem token)
+    const response = await axios.get('https://api.clickbus.com/api/v4/trips', {
+      params: {
+        from: `${origemSlug}-todos`, // O "-todos" é o padrão da ClickBus
+        to: `${destinoSlug}-todos`,
         departureDate: data,
-        page: 1
+        clientId: 'buser-online-clone' // Um identificador qualquer
       },
-      {
-        headers: {
-          'Authorization': `Bearer ${GEKKO_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
-    );
+    });
 
     const json = response.data;
-    let viagens = [];
-    if (json.data && Array.isArray(json.data)) viagens = json.data;
-    else if (json.data && json.data.items) viagens = json.data.items;
 
+    // 3. A ClickBus costuma retornar os itens em "data" ou "trips"
+    let viagens = json.data || json.trips || [];
+    if (!Array.isArray(viagens)) viagens = [];
+
+    console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
+
+    // 4. Formata os dados para o seu Frontend
     const viagensFormatadas = viagens.map(trip => {
-      const nomeEmpresa = 
-        trip.travelCompany?.name || 
-        trip.company?.name || 
-        trip.busCompany?.name || 
-        "Viação Parceira";
-
-      // 🔥 AQUI ESTÁ A ALEATORIEDADE DAS POLTRONAS
+      // A ClickBus usa "company" ou "travelCompany"
+      const nomeEmpresa = trip.company?.name || trip.travelCompany?.name || "Viação Parceira";
+      
+      // 🔥 MANTENDO A LÓGICA DAS POLTRONAS ALEATÓRIAS (35%)
       const totalAssentos = 46;
-      const qtdOcupadas = Math.floor(totalAssentos * 0.35); // 35% de 46 = 16 poltronas
-      const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
+      const qtdOcupadas = Math.floor(totalAssentos * 0.35);
       const ocupadas = [];
-
-      // Embaralha o array de poltronas usando o ID da viagem (para ser determinístico)
-      // Assim, a mesma viagem sempre terá as mesmas poltronas ocupadas.
-      let seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      for (let i = todasPoltronas.length - 1; i > 0; i--) {
-        seed = (seed * 9301 + 49297) % 233280;
-        const j = Math.floor((seed / 233280) * (i + 1));
-        [todasPoltronas[i], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[i]];
+      const seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      for (let i = 1; i <= totalAssentos; i++) {
+        if ((i * seed) % 10 < 3.5) ocupadas.push(i);
       }
-
-      // Pega as primeiras "qtdOcupadas" poltronas do array embaralhado
-      ocupadas.push(...todasPoltronas.slice(0, qtdOcupadas));
 
       return {
         id: trip.id || Math.random().toString(),
         company: { 
           name: nomeEmpresa, 
-          logo: trip.travelCompany?.logo || trip.company?.logo || "" 
+          logo: trip.company?.logo || trip.travelCompany?.logo || "" 
         },
-        price: Number(trip.price || trip.preco || 0),
-        bus_type: trip.bus_type || "Convencional",
+        price: Number(trip.price || trip.fare || 0),
+        bus_type: trip.bus_type || trip.serviceClass || "Convencional",
         total_seats: totalAssentos,
-        occupied_seats: ocupadas, // Envia as poltronas aleatórias para o Frontend
+        occupied_seats: ocupadas.slice(0, qtdOcupadas),
         departure: {
           time: trip.departure?.time || "--:--",
-          city: origemCidade,
+          city: origem.split(',')[0].trim(),
           terminal: { 
-            name: trip.departure?.place?.name || trip.departure?.terminal?.name || "Terminal Principal", 
-            address: trip.departure?.place?.address || "" 
+            name: trip.departure?.location?.name || trip.departure?.terminal?.name || "Terminal Principal", 
+            address: trip.departure?.location?.address || "" 
           }
         },
         arrival: {
           time: trip.arrival?.time || "--:--",
-          city: destinoCidade,
+          city: destino.split(',')[0].trim(),
           terminal: { 
-            name: trip.arrival?.place?.name || trip.arrival?.terminal?.name || "Terminal Principal", 
-            address: trip.arrival?.place?.address || "" 
+            name: trip.arrival?.location?.name || trip.arrival?.terminal?.name || "Terminal Principal", 
+            address: trip.arrival?.location?.address || "" 
           }
         }
       };
@@ -106,12 +87,11 @@ app.get('/api/clickbus/search', async (req, res) => {
     res.json({ data: viagensFormatadas });
 
   } catch (error) {
-    console.error('❌ ERRO NA GEKKOAPI:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro ao buscar viagens', data: [] });
+    console.error('❌ ERRO NA CLICKBUS:', error.response?.data || error.message);
+    res.status(500).json({ 
+      error: 'Erro ao buscar viagens', 
+      detalhes: error.response?.data || error.message,
+      data: [] 
+    });
   }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
 });
