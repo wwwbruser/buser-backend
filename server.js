@@ -15,7 +15,15 @@ const serviceAccount = {
   "project_id": process.env.FIREBASE_PROJECT_ID,
   "client_email": process.env.FIREBASE_CLIENT_EMAIL,
   // O .replace é crucial para transformar os "\n" da variável em quebras de linha reais
-  "private_key": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+  "var admin = require("firebase-admin");
+
+var serviceAccount = require("path/to/serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
+});
+": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
 };
 
 if (!admin.apps.length) {
@@ -101,7 +109,6 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
 
         let resultado = null;
         try {
-            // Tenta buscar na ClickBus
             const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
                 params: {
                     from: `${criarSlug(pedido.origem)}-todos`,
@@ -129,7 +136,6 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
             console.log('ClickBus bloqueou ou não retornou. Usando demonstração.');
         }
 
-        // Se falhou (ou não achou nada), usa o Modo Demonstração para não deixar o cliente na mão
         if (!resultado || resultado.length === 0) {
             resultado = [
                 { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [], departure: { time: '08:00', city: pedido.origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: pedido.destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } },
@@ -137,7 +143,6 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
             ];
         }
 
-        // Atualiza o pedido no Firebase com o resultado final
         await db.ref(`fila_pedidos/${pedidoId}`).update({
             status: 'concluido',
             resultado: resultado,
