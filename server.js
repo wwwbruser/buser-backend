@@ -9,12 +9,10 @@ app.use(express.json());
 // 🔑 SUA CHAVE DE API DO SCRAPERAPI
 const SCRAPER_API_KEY = "d793e70f21a22967eacd95419029258e";
 
-// Rota de teste
 app.get('/', (req, res) => {
-  res.send('API Buser Online - ScraperAPI (Força Máxima)');
+  res.send('API Buser Online - ScraperAPI (Ultra)');
 });
 
-// Rota principal de busca
 app.get('/api/clickbus/search', async (req, res) => {
   const { origem, destino, data } = req.query;
 
@@ -32,37 +30,33 @@ app.get('/api/clickbus/search', async (req, res) => {
     const origemSlug = criarSlug(origem);
     const destinoSlug = criarSlug(destino);
 
-    console.log(`\n--- BUSCA CLICKBUS (ScraperAPI - Força Máxima) ---`);
+    console.log(`\n--- BUSCA CLICKBUS (Ultra Premium) ---`);
     console.log(`Origem: ${origemSlug} | Destino: ${destinoSlug} | Data: ${data}`);
 
-    // URL da API da ClickBus que queremos acessar
     const clickbusUrl = 'https://api.clickbus.com/api/v5/trips';
     
-    // Chamada para o ScraperAPI com todos os parâmetros de força
     const response = await axios.get('https://api.scraperapi.com', {
       params: {
         api_key: SCRAPER_API_KEY,
         url: clickbusUrl,
-        // Parâmetros da ClickBus (enviados como query string)
         from: `${origemSlug}-todos`,
         to: `${destinoSlug}-todos`,
         departureDate: data,
         clientId: 'buser-online-clone',
         
-        // 🔥 FORÇA MÁXIMA:
-        country_code: 'br', // Usar IPs do Brasil
-        premium: 'true',    // Usar proxies residenciais (mais caro, mas passa bloqueios)
-        render: 'true',     // Renderizar JS (caso a API dependa de JS)
-        keep_headers: 'true'// Manter headers originais
+        // 🔥 FORÇA MÁXIMA ULTRA:
+        country_code: 'br',
+        ultra_premium: 'true', // <-- MUDANÇA AQUI
+        render: 'true',
+        keep_headers: 'true'
       },
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      timeout: 60000 // Aumenta o timeout do Axios para 60 segundos
+      timeout: 120000 // 2 minutos
     });
 
-    // O ScraperAPI retorna o conteúdo como string, então precisamos converter para JSON
     let json;
     try {
       json = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
@@ -76,11 +70,9 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     console.log(`✅ Foram encontradas ${viagens.length} viagens.`);
 
-    // Formata os dados para o Frontend
     const viagensFormatadas = viagens.map(trip => {
       const nomeEmpresa = trip.company?.name || trip.travelCompany?.name || "Viação Parceira";
       
-      // Lógica das poltronas aleatórias (35%)
       const totalAssentos = 46;
       const qtdOcupadas = Math.floor(totalAssentos * 0.35);
       const ocupadas = [];
@@ -130,7 +122,6 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 });
 
-// Inicialização do Servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
