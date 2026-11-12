@@ -15,15 +15,7 @@ const serviceAccount = {
   "project_id": process.env.FIREBASE_PROJECT_ID,
   "client_email": process.env.FIREBASE_CLIENT_EMAIL,
   // O .replace é crucial para transformar os "\n" da variável em quebras de linha reais
-  "var admin = require("firebase-admin");
-
-var serviceAccount = require("path/to/serviceAccountKey.json");
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
-});
-": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
+  "private_key": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
 };
 
 if (!admin.apps.length) {
@@ -35,7 +27,6 @@ if (!admin.apps.length) {
     console.log("✅ Firebase Admin inicializado com sucesso via variáveis de ambiente.");
   } catch (error) {
     console.error("❌ ERRO CRÍTICO: Falha ao inicializar o Firebase Admin.", error.message);
-    console.error("Verifique se as variáveis FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY estão corretas no Render.");
   }
 }
 const db = admin.database();
@@ -45,28 +36,16 @@ const db = admin.database();
 // ============================================================
 app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
-    
-    if (!origem || !destino || !data) {
-        return res.status(400).json({ error: 'Faltando parâmetros.' });
-    }
+    if (!origem || !destino || !data) return res.status(400).json({ error: 'Faltando parâmetros.' });
 
     const pedidoId = uuidv4();
-
     try {
-        await db.ref(`fila_pedidos/${pedidoId}`).set({
-            status: 'processando',
-            origem,
-            destino,
-            data,
-            criadoEm: Date.now()
-        });
-
+        await db.ref(`fila_pedidos/${pedidoId}`).set({ status: 'processando', origem, destino, data, criadoEm: Date.now() });
         console.log(`📥 Pedido ${pedidoId} enfileirado no Firebase.`);
-        // Responde IMEDIATAMENTE para o frontend
         res.status(202).json({ message: 'Busca em andamento.', pedidoId });
     } catch (error) {
         console.error('Erro ao enfileirar no Firebase:', error.message);
-        res.status(500).json({ error: 'Erro ao criar pedido. Verifique as credenciais do Firebase no Render.' });
+        res.status(500).json({ error: 'Erro ao criar pedido.' });
     }
 });
 
@@ -75,15 +54,12 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
     try {
         const snapshot = await db.ref(`fila_pedidos/${pedidoId}`).once('value');
         const pedido = snapshot.val();
-
         if (!pedido) return res.status(404).json({ error: 'Pedido não encontrado.' });
         if (pedido.status === 'processando') return res.status(202).json({ status: 'processando' });
         if (pedido.status === 'erro') return res.status(500).json({ status: 'erro', message: pedido.erro });
-
         res.json({ status: 'concluido', data: pedido.resultado });
     } catch (error) {
-        console.error('Erro ao consultar resultado:', error.message);
-        res.status(500).json({ error: 'Erro ao consultar resultado.' });
+        res.status(500).json({ error: 'Erro ao consultar.' });
     }
 });
 
@@ -95,7 +71,6 @@ console.log('Worker iniciado. Aguardando pedidos na fila...');
 db.ref('fila_pedidos').on('child_added', async (snapshot) => {
     const pedidoId = snapshot.key;
     const pedido = snapshot.val();
-
     if (pedido.status !== 'processando') return;
 
     console.log(`\n⚙️ Processando pedido ${pedidoId} (${pedido.origem} -> ${pedido.destino})`);
@@ -110,12 +85,7 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
         let resultado = null;
         try {
             const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
-                params: {
-                    from: `${criarSlug(pedido.origem)}-todos`,
-                    to: `${criarSlug(pedido.destino)}-todos`,
-                    departureDate: pedido.data,
-                    clientId: 'buser-online-clone'
-                },
+                params: { from: `${criarSlug(pedido.origem)}-todos`, to: `${criarSlug(pedido.destino)}-todos`, departureDate: pedido.data, clientId: 'buser-online-clone' },
                 headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
                 timeout: 60000
             });
@@ -126,15 +96,12 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
                     company: { name: trip.company?.name || trip.travelCompany?.name || "Viação Parceira", logo: trip.company?.logo || "" },
                     price: Number(trip.price || trip.fare || 0),
                     bus_type: trip.bus_type || trip.serviceClass || "Convencional",
-                    total_seats: 46,
-                    occupied_seats: [],
+                    total_seats: 46, occupied_seats: [],
                     departure: { time: trip.departure?.time || "--:--", city: pedido.origem.split(',')[0], terminal: { name: trip.departure?.location?.name || "Terminal Principal", address: "" } },
                     arrival: { time: trip.arrival?.time || "--:--", city: pedido.destino.split(',')[0], terminal: { name: trip.arrival?.location?.name || "Terminal Principal", address: "" } }
                 }));
             }
-        } catch (e) {
-            console.log('ClickBus bloqueou ou não retornou. Usando demonstração.');
-        }
+        } catch (e) { console.log('ClickBus bloqueou. Usando demonstração.'); }
 
         if (!resultado || resultado.length === 0) {
             resultado = [
@@ -143,17 +110,12 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
             ];
         }
 
-        await db.ref(`fila_pedidos/${pedidoId}`).update({
-            status: 'concluido',
-            resultado: resultado,
-            concluidoEm: Date.now()
-        });
-
+        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado: resultado, concluidoEm: Date.now() });
         console.log(`✅ Pedido ${pedidoId} concluído com ${resultado.length} viagens.`);
 
     } catch (error) {
         console.error(`❌ Falha no pedido ${pedidoId}:`, error);
-        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro interno ao processar a busca.' });
+        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro interno.' });
     }
 });
 
