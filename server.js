@@ -17,7 +17,6 @@ app.get('/api/clickbus/search', async (req, res) => {
     const pedidoId = uuidv4();
     filaPedidos[pedidoId] = { status: 'processando' };
     
-    // Responde na hora
     res.status(202).json({ message: 'Busca em andamento.', pedidoId });
 
     try {
@@ -31,10 +30,9 @@ app.get('/api/clickbus/search', async (req, res) => {
         if (proxyUrl) {
             agent = new HttpsProxyAgent(proxyUrl);
             console.log('✅ Usando Proxy GTI.');
-        } else {
-            console.log('⚠️ Proxy não configurado. Tentando sem proxy...');
         }
 
+        // Chamada para a GeckoAPI
         const response = await axios.post(
             'https://api.geckoapi.com.br/v1/extract',
             {
@@ -57,8 +55,20 @@ app.get('/api/clickbus/search', async (req, res) => {
             }
         );
 
-        let viagens = response.data.data || response.data.trips || [];
-        if (Array.isArray(viagens) && viagens.length > 0) {
+        // 🔥 O ESPIÃO: Vai imprimir o JSON inteiro da GeckoAPI no log do Render
+        console.log('\n[DEBUG GECKO] Resposta crua:', JSON.stringify(response.data).substring(0, 1500));
+
+        // Tenta ler as viagens de todos os lugares possíveis
+        let viagens = [];
+        if (response.data) {
+            if (Array.isArray(response.data)) viagens = response.data;
+            else if (response.data.data && Array.isArray(response.data.data)) viagens = response.data.data;
+            else if (response.data.data && response.data.data.items) viagens = response.data.data.items;
+            else if (response.data.items) viagens = response.data.items;
+            else if (response.data.trips) viagens = response.data.trips;
+        }
+
+        if (viagens.length > 0) {
             console.log(`✅ GeckoAPI retornou ${viagens.length} viagens reais!`);
             
             const resultadoReal = viagens.map(trip => ({
@@ -75,15 +85,14 @@ app.get('/api/clickbus/search', async (req, res) => {
             filaPedidos[pedidoId] = { status: 'concluido', data: resultadoReal };
             return; 
         } else {
-            console.log('⚠️ GeckoAPI retornou 0 viagens. Usando fallback.');
+            console.log('⚠️ O JSON acima não contém viagens no formato esperado. Usando fallback.');
         }
 
     } catch (error) {
         console.error('❌ Erro na GeckoAPI:', error.response?.data || error.message);
-        console.log('⚠️ Usando fallback (dados falsos) para não travar o site.');
     }
 
-    // FALLBACK (Se a API falhar)
+    // FALLBACK
     setTimeout(() => {
         filaPedidos[pedidoId] = {
             status: 'concluido',
