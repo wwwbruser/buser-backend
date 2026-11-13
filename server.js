@@ -119,10 +119,12 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
     const pedido = snapshot.val();
     if (pedido.status !== 'processando') return;
 
-    // ⏳ Espera 10 segundos para ver se o PC resolve
+    // ⏳ Espera 10 segundos para ver se o PC do usuário resolve
     setTimeout(async () => {
         const snapAtual = await db.ref(`fila_pedidos/${pedidoId}`).once('value');
         const pedidoAtual = snapAtual.val();
+        
+        // Se o PC já resolveu (status 'concluido'), ignora o fallback
         if (pedidoAtual.status !== 'processando' && pedidoAtual.status !== 'erro_pc') return;
 
         console.log(`\n⏳ PC não respondeu a tempo. Render gerando viagens (Fallback) para: ${pedido.origem} -> ${pedido.destino}`);
@@ -179,6 +181,7 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
             }
 
             await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado, concluidoEm: Date.now() });
+            console.log(`✅ Fallback concluído para ${pedidoId}.`);
         } catch (error) {
             await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro no fallback.' });
         }
