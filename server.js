@@ -2,14 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const admin = require('firebase-admin');
-const axios = require('axios');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// 🔒 FIREBASE (USANDO O JSON COMPLETO DA VARIÁVEL DE AMBIENTE)
+// 🔒 FIREBASE
 // ============================================================
 if (!admin.apps.length) {
   try {
@@ -58,102 +57,80 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ============================================================
-// WORKER (PROCESSA A FILA COM A GECKOAPI)
+// WORKER (GERADOR DE VIAGENS INTELIGENTE)
 // ============================================================
-console.log('Worker iniciado. Aguardando pedidos na fila...');
+console.log('Worker iniciado. Gerador de viagens pronto...');
 
 db.ref('fila_pedidos').on('child_added', async (snapshot) => {
     const pedidoId = snapshot.key;
     const pedido = snapshot.val();
     if (pedido.status !== 'processando') return;
 
-    console.log(`\n⚙️ Processando pedido ${pedidoId} (${pedido.origem} -> ${pedido.destino})`);
+    console.log(`\n⚙️ Gerando viagens para: ${pedido.origem} -> ${pedido.destino}`);
 
     try {
-        const [origemCidade, origemUF] = pedido.origem.split(',').map(s => s.trim());
-        const [destinoCidade, destinoUF] = pedido.destino.split(',').map(s => s.trim());
+        const [origemCidade] = pedido.origem.split(',').map(s => s.trim());
+        const [destinoCidade] = pedido.destino.split(',').map(s => s.trim());
+        
+        // 🔥 GERADOR DE VIAGENS FICTÍCIAS (MOCK)
+        const empresas = ['Catedral', 'Nacional', 'Gontijo', 'Expresso do Sul', 'Itapemirim', 'Águia Branca'];
+        const tipos = ['Executivo', 'Convencional', 'Semi-leito', 'Leito'];
+        
+        // Sorteia entre 3 e 5 viagens para parecer real
+        const qtdViagens = Math.floor(Math.random() * 3) + 3; 
+        const resultado = [];
 
-        let resultado = null;
-        try {
-            const response = await axios.post(
-                'https://api.geckoapi.com.br/v1/extract',
-                {
-                    target: 'clickbus.com.br',
-                    type: 'plp',
-                    originCity: origemCidade,
-                    originState: origemUF,
-                    destinationCity: destinoCidade,
-                    destinationState: destinoUF,
-                    departureDate: pedido.data,
-                    page: 1
-                },
-                {
-                    headers: {
-                        'Authorization': `Bearer ${process.env.GECKO_API_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 60000
-                }
-            );
+        for (let i = 0; i < qtdViagens; i++) {
+            const empresa = empresas[Math.floor(Math.random() * empresas.length)];
+            const tipo = tipos[Math.floor(Math.random() * tipos.length)];
+            const precoBase = Math.floor(Math.random() * 200) + 100; // Preço entre 100 e 300
+            
+            // Gera horário de saída aleatório (entre 5h e 23h)
+            const horaSaida = Math.floor(Math.random() * 18) + 5;
+            const minutoSaida = Math.random() > 0.5 ? '30' : '00';
+            const timeSaida = `${String(horaSaida).padStart(2, '0')}:${minutoSaida}`;
+            
+            // Horário de chegada (saída + 6 horas em média)
+            const horaChegada = (horaSaida + 6) % 24;
+            const timeChegada = `${String(horaChegada).padStart(2, '0')}:${minutoSaida}`;
 
-            let viagens = response.data.data || response.data.trips || [];
-            if (Array.isArray(viagens) && viagens.length > 0) {
-                resultado = viagens.map(trip => {
-                    // 🔥 Lógica das poltronas aleatórias (35% exatos)
-                    const totalAssentos = 46;
-                    const qtdOcupadas = Math.floor(totalAssentos * 0.35);
-                    const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
-                    
-                    let seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-                    for (let i = todasPoltronas.length - 1; i > 0; i--) {
-                        seed = (seed * 9301 + 49297) % 233280;
-                        const j = Math.floor((seed / 233280) * (i + 1));
-                        [todasPoltronas[i], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[i]];
-                    }
-                    const ocupadas = todasPoltronas.slice(0, qtdOcupadas);
-
-                    return {
-                        id: trip.id || Math.random().toString(),
-                        company: { 
-                            name: trip.travelCompany?.name || trip.company?.name || "Viação Parceira", 
-                            logo: trip.travelCompany?.logo || trip.company?.logo || "" // Repassa a logo
-                        },
-                        price: Number(trip.price || 0),
-                        bus_type: trip.bus_type || "Convencional",
-                        total_seats: totalAssentos,
-                        occupied_seats: ocupadas,
-                        departure: { 
-                            time: trip.departure?.time || "--:--", 
-                            city: origemCidade, 
-                            terminal: { name: trip.departure?.place?.name || "Terminal Principal", address: "" } 
-                        },
-                        arrival: { 
-                            time: trip.arrival?.time || "--:--", 
-                            city: destinoCidade, 
-                            terminal: { name: trip.arrival?.place?.name || "Terminal Principal", address: "" } 
-                        }
-                    };
-                });
+            // 🔥 Lógica das poltronas aleatórias (35% exatos)
+            const totalAssentos = 46;
+            const qtdOcupadas = Math.floor(totalAssentos * 0.35);
+            const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
+            let seed = (pedidoId + i).toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            for (let k = todasPoltronas.length - 1; k > 0; k--) {
+                seed = (seed * 9301 + 49297) % 233280;
+                const j = Math.floor((seed / 233280) * (k + 1));
+                [todasPoltronas[k], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[k]];
             }
-        } catch (e) {
-            console.error('❌ Erro na GeckoAPI:', e.response?.data || e.message);
-        }
 
-        // Se falhou ou não achou nada, usa o Modo Demonstração
-        if (!resultado || resultado.length === 0) {
-            console.log('⚠️ GeckoAPI falhou ou não retornou. Usando Modo Demonstração.');
-            resultado = [
-                { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [2, 5, 8, 12, 15, 22, 28, 33, 40, 41, 42, 43, 44, 45, 46, 47].slice(0, 16), departure: { time: '08:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } },
-                { id: 'demo-2', company: { name: 'Nacional', logo: '' }, bus_type: 'Convencional', price: 180.00, total_seats: 46, occupied_seats: [3, 7, 11, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36].slice(0, 16), departure: { time: '14:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } }
-            ];
+            resultado.push({
+                id: uuidv4(),
+                company: { name: empresa, logo: '' },
+                price: precoBase,
+                bus_type: tipo,
+                total_seats: totalAssentos,
+                occupied_seats: todasPoltronas.slice(0, qtdOcupadas),
+                departure: { 
+                    time: timeSaida, 
+                    city: origemCidade, 
+                    terminal: { name: 'Rodoviária Principal', address: '' } 
+                },
+                arrival: { 
+                    time: timeChegada, 
+                    city: destinoCidade, 
+                    terminal: { name: 'Terminal Rodoviário', address: '' } 
+                }
+            });
         }
 
         await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado, concluidoEm: Date.now() });
-        console.log(`✅ Pedido ${pedidoId} concluído com ${resultado.length} viagens.`);
+        console.log(`✅ Viagens geradas com sucesso para ${pedidoId}.`);
 
     } catch (error) {
         console.error(`❌ Falha no pedido ${pedidoId}:`, error);
-        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro interno.' });
+        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro ao gerar viagens.' });
     }
 });
 
