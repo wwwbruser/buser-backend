@@ -9,12 +9,16 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// 🔒 CONFIGURAÇÃO DO FIREBASE (USANDO VARIÁVEIS DE AMBIENTE)
+// 🔑 CHAVE DA GECKOAPI (COLE A SUA CHAVE AQUI)
+// ============================================================
+const GECKO_API_KEY = "pk_live_IigOgQi7WIKJsTdtOkripDvJPCZ2F9wQ"; // <-- Substitua pelo seu token da GeckoAPI
+
+// ============================================================
+// 🔒 FIREBASE (BUSCA DAS VARIÁVEIS DE AMBIENTE DO RENDER)
 // ============================================================
 const serviceAccount = {
   "project_id": process.env.FIREBASE_PROJECT_ID,
   "client_email": process.env.FIREBASE_CLIENT_EMAIL,
-  // O .replace é crucial para transformar os "\n" da variável em quebras de linha reais
   "private_key": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
 };
 
@@ -24,15 +28,15 @@ if (!admin.apps.length) {
       credential: admin.credential.cert(serviceAccount),
       databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
     });
-    console.log("✅ Firebase Admin inicializado com sucesso via variáveis de ambiente.");
+    console.log("✅ Firebase Admin inicializado com sucesso.");
   } catch (error) {
-    console.error("❌ ERRO CRÍTICO: Falha ao inicializar o Firebase Admin.", error.message);
+    console.error("❌ ERRO CRÍTICO no Firebase:", error.message);
   }
 }
 const db = admin.database();
 
 // ============================================================
-// PARTE 1: WEB SERVICE (RESPOSTA RÁPIDA)
+// ROTAS DO WEB SERVICE (RESPOSTA RÁPIDA)
 // ============================================================
 app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
@@ -41,10 +45,10 @@ app.get('/api/clickbus/search', async (req, res) => {
     const pedidoId = uuidv4();
     try {
         await db.ref(`fila_pedidos/${pedidoId}`).set({ status: 'processando', origem, destino, data, criadoEm: Date.now() });
-        console.log(`📥 Pedido ${pedidoId} enfileirado no Firebase.`);
+        console.log(`📥 Pedido ${pedidoId} enfileirado.`);
         res.status(202).json({ message: 'Busca em andamento.', pedidoId });
     } catch (error) {
-        console.error('Erro ao enfileirar no Firebase:', error.message);
+        console.error('Erro ao enfileirar:', error.message);
         res.status(500).json({ error: 'Erro ao criar pedido.' });
     }
 });
@@ -64,7 +68,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ============================================================
-// PARTE 2: WORKER (PROCESSA A FILA EM SEGUNDO PLANO)
+// WORKER (PROCESSA A FILA COM A GECKOAPI)
 // ============================================================
 console.log('Worker iniciado. Aguardando pedidos na fila...');
 
@@ -76,41 +80,60 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
     console.log(`\n⚙️ Processando pedido ${pedidoId} (${pedido.origem} -> ${pedido.destino})`);
 
     try {
-        const criarSlug = (cidadeString) => {
-            const [cidade, uf] = cidadeString.split(',').map(s => s.trim());
-            const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, '-');
-            return `${cidadeSlug}-${uf.toLowerCase()}`;
-        };
+        const [origemCidade, origemUF] = pedido.origem.split(',').map(s => s.trim());
+        const [destinoCidade, destinoUF] = pedido.destino.split(',').map(s => s.trim());
 
         let resultado = null;
         try {
-            const response = await axios.get('https://api.clickbus.com/api/v5/trips', {
-                params: { from: `${criarSlug(pedido.origem)}-todos`, to: `${criarSlug(pedido.destino)}-todos`, departureDate: pedido.data, clientId: 'buser-online-clone' },
-                headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-                timeout: 60000
-            });
+            // 🔥 Chamada para a GeckoAPI usando a chave no código
+            const response = await axios.post(
+                'https://api.geckoapi.com.br/v1/extract',
+                {
+                    target: 'clickbus.com.br',
+                    type: 'plp',
+                    originCity: origemCidade,
+                    originState: origemUF,
+                    destinationCity: destinoCidade,
+                    destinationState: destinoUF,
+                    departureDate: pedido.data,
+                    page: 1
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${GECKO_API_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 60000
+                }
+            );
+
             let viagens = response.data.data || response.data.trips || [];
             if (Array.isArray(viagens) && viagens.length > 0) {
                 resultado = viagens.map(trip => ({
                     id: trip.id || Math.random().toString(),
-                    company: { name: trip.company?.name || trip.travelCompany?.name || "Viação Parceira", logo: trip.company?.logo || "" },
-                    price: Number(trip.price || trip.fare || 0),
-                    bus_type: trip.bus_type || trip.serviceClass || "Convencional",
-                    total_seats: 46, occupied_seats: [],
-                    departure: { time: trip.departure?.time || "--:--", city: pedido.origem.split(',')[0], terminal: { name: trip.departure?.location?.name || "Terminal Principal", address: "" } },
-                    arrival: { time: trip.arrival?.time || "--:--", city: pedido.destino.split(',')[0], terminal: { name: trip.arrival?.location?.name || "Terminal Principal", address: "" } }
+                    company: { name: trip.travelCompany?.name || trip.company?.name || "Viação Parceira", logo: trip.travelCompany?.logo || "" },
+                    price: Number(trip.price || 0),
+                    bus_type: trip.bus_type || "Convencional",
+                    total_seats: 46,
+                    occupied_seats: [],
+                    departure: { time: trip.departure?.time || "--:--", city: origemCidade, terminal: { name: trip.departure?.place?.name || "Terminal Principal", address: "" } },
+                    arrival: { time: trip.arrival?.time || "--:--", city: destinoCidade, terminal: { name: trip.arrival?.place?.name || "Terminal Principal", address: "" } }
                 }));
             }
-        } catch (e) { console.log('ClickBus bloqueou. Usando demonstração.'); }
+        } catch (e) {
+            console.error('❌ Erro na GeckoAPI:', e.response?.data || e.message);
+        }
 
+        // Se falhou ou não achou nada, usa o Modo Demonstração
         if (!resultado || resultado.length === 0) {
+            console.log('⚠️ GeckoAPI falhou ou não retornou. Usando Modo Demonstração.');
             resultado = [
-                { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [], departure: { time: '08:00', city: pedido.origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: pedido.destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } },
-                { id: 'demo-2', company: { name: 'Nacional', logo: '' }, bus_type: 'Convencional', price: 180.00, total_seats: 46, occupied_seats: [], departure: { time: '14:00', city: pedido.origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: pedido.destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } }
+                { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [], departure: { time: '08:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } },
+                { id: 'demo-2', company: { name: 'Nacional', logo: '' }, bus_type: 'Convencional', price: 180.00, total_seats: 46, occupied_seats: [], departure: { time: '14:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } }
             ];
         }
 
-        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado: resultado, concluidoEm: Date.now() });
+        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado, concluidoEm: Date.now() });
         console.log(`✅ Pedido ${pedidoId} concluído com ${resultado.length} viagens.`);
 
     } catch (error) {
