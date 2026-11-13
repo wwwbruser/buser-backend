@@ -9,12 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// 🔑 CHAVE DA GECKOAPI (COLE A SUA CHAVE AQUI)
-// ============================================================
-const GECKO_API_KEY = "pk_live_IigOgQi7WIKJsTdtOkripDvJPCZ2F9wQ"; // Substitua pelo seu token da GeckoAPI
-
-// ============================================================
-// 🔒 FIREBASE (BUSCA DAS VARIÁVEIS DE AMBIENTE DO RENDER)
+// 🔒 FIREBASE (USANDO VARIÁVEIS DE AMBIENTE DO RENDER)
 // ============================================================
 const serviceAccount = {
   "project_id": process.env.FIREBASE_PROJECT_ID,
@@ -28,7 +23,7 @@ if (!admin.apps.length) {
       credential: admin.credential.cert(serviceAccount),
       databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
     });
-    console.log("✅ Firebase Admin inicializado.");
+    console.log("✅ Firebase Admin inicializado com sucesso.");
   } catch (error) {
     console.error("❌ ERRO CRÍTICO no Firebase:", error.message);
   }
@@ -98,7 +93,7 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
                 },
                 {
                     headers: {
-                        'Authorization': `Bearer ${GECKO_API_KEY}`,
+                        'Authorization': `Bearer ${process.env.GECKO_API_KEY}`,
                         'Content-Type': 'application/json'
                     },
                     timeout: 60000
