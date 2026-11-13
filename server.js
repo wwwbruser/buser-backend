@@ -9,16 +9,11 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// 🔒 FIREBASE (USANDO VARIÁVEIS DE AMBIENTE DO RENDER)
+// 🔒 FIREBASE (USANDO O JSON COMPLETO DA VARIÁVEL DE AMBIENTE)
 // ============================================================
-const serviceAccount = {
-  "project_id": process.env.FIREBASE_PROJECT_ID,
-  "client_email": process.env.FIREBASE_CLIENT_EMAIL,
-  "private_key": process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
-};
-
 if (!admin.apps.length) {
   try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
@@ -40,6 +35,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     const pedidoId = uuidv4();
     try {
         await db.ref(`fila_pedidos/${pedidoId}`).set({ status: 'processando', origem, destino, data, criadoEm: Date.now() });
+        console.log(`📥 Pedido ${pedidoId} enfileirado.`);
         res.status(202).json({ message: 'Busca em andamento.', pedidoId });
     } catch (error) {
         console.error('Erro ao enfileirar:', error.message);
