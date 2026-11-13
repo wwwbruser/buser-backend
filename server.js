@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// 🔒 FIREBASE
+// 🔒 FIREBASE (USANDO O JSON COMPLETO DA VARIÁVEL DE AMBIENTE)
 // ============================================================
 if (!admin.apps.length) {
   try {
@@ -25,7 +25,7 @@ if (!admin.apps.length) {
 const db = admin.database();
 
 // ============================================================
-// 🗺️ COORDENADAS DAS CIDADES (Capitais e principais polos)
+// 🗺️ COORDENADAS DAS CIDADES (Para o cálculo de distância)
 // ============================================================
 const COORDENADAS = {
     "sao paulo, sp": [-23.5505, -46.6333], "rio de janeiro, rj": [-22.9068, -43.1729],
@@ -42,46 +42,43 @@ const COORDENADAS = {
     "vitoria, es": [-20.3155, -40.3128], "porto velho, ro": [-8.7608, -63.8999],
     "macapa, ap": [0.0349, -51.0694], "rio branco, ac": [-9.9754, -67.8249],
     "boa vista, rr": [2.8235, -60.6758], "palmas, to": [-10.1689, -48.3317],
-    "guarulhos, sp": [-23.4538, -46.5333], "osasco, sp": [-23.5325, -46.7917],
-    "santos, sp": [-23.9618, -46.3322], "ribeirao preto, sp": [-21.1704, -47.8103],
-    "uberlandia, mg": [-18.9186, -48.2772], "juiz de fora, mg": [-21.7642, -43.3502],
-    "londrina, pr": [-23.3045, -51.1696], "maringa, pr": [-23.4205, -51.9331],
-    "joinville, sc": [-26.3045, -48.8487], "blumenau, sc": [-26.9194, -49.0661],
-    "caxias do sul, rs": [-29.1678, -51.1794], "feira de santana, ba": [-12.2664, -38.9663],
-    "ilheus, ba": [-14.7936, -39.0465], "porto seguro, ba": [-16.4497, -39.0647],
-    "caruaru, pe": [-8.2833, -35.9758], "petrolina, pe": [-9.3922, -40.5033],
-    "mossoro, rn": [-5.1875, -37.3442], "maraba, pa": [-5.3686, -49.1178],
-    "santarem, pa": [-2.4431, -54.7083], "anapolis, go": [-16.3267, -48.9528],
-    "rondonopolis, mt": [-16.4708, -54.6356], "dourados, ms": [-22.2211, -54.8056],
-    "imperatriz, ma": [-5.5264, -47.4917], "angra dos reis, rj": [-23.0067, -44.3181],
-    "cabo frio, rj": [-22.8800, -42.0186], "niteroi, rj": [-22.8833, -43.1036],
-    "vila velha, es": [-20.3297, -40.2925], "chapeco, sc": [-27.1000, -52.6153]
+    "angra dos reis, rj": [-23.0067, -44.3181], "imperatriz, ma": [-5.5264, -47.4917]
 };
 
 // ============================================================
-// 🧮 FUNÇÕES MATEMÁTICAS PARA QUALQUER CIDADE
+// 🧮 FUNÇÕES DE CÁLCULO
 // ============================================================
 function calcularDistanciaHaversine(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Raio da Terra em km
+    const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return Math.round((R * c) * 1.3); // Fator 1.3 = estradas curvam
+    return Math.round((R * c) * 1.3); 
 }
 
-// Fallback para cidades sem coordenadas (Gera distância fixa baseada no nome)
 function hashDistance(origem, destino) {
-    const pair = [origem.toLowerCase(), destino.toLowerCase()].sort().join('-');
-    let hash = 0;
-    for (let i = 0; i < pair.length; i++) {
-        hash = ((hash << 5) - hash) + pair.charCodeAt(i);
-        hash = hash & hash;
-    }
-    // Retorna algo entre 150km e 1500km (nunca muda para o mesmo par)
+    const pair = [origem.toLowerCase(), destino.toLowerCase()].sort().join('-'); let hash = 0;
+    for (let i = 0; i < pair.length; i++) { hash = ((hash << 5) - hash) + pair.charCodeAt(i); hash = hash & hash; }
     return 150 + (Math.abs(hash) % 1350);
+}
+
+// 🔥 FÓRMULA DE PREÇO PROGRESSIVO (Preços reais)
+function calcularPrecoBase(distanciaKm, tipo) {
+    let preco = 10; // Taxa de embarque
+
+    if (distanciaKm <= 100) {
+        preco += distanciaKm * 0.45;
+    } else if (distanciaKm <= 500) {
+        preco += (100 * 0.45) + ((distanciaKm - 100) * 0.22);
+    } else if (distanciaKm <= 1500) {
+        preco += (100 * 0.45) + (400 * 0.22) + ((distanciaKm - 500) * 0.12);
+    } else {
+        preco += (100 * 0.45) + (400 * 0.22) + (1000 * 0.12) + ((distanciaKm - 1500) * 0.08);
+    }
+
+    const multiplicadores = { 'Convencional': 1.0, 'Executivo': 1.3, 'Semi-leito': 1.5, 'Leito': 1.8 };
+    return preco * (multiplicadores[tipo] || 1.0);
 }
 
 // ============================================================
@@ -94,7 +91,6 @@ app.get('/api/clickbus/search', async (req, res) => {
     const pedidoId = uuidv4();
     try {
         await db.ref(`fila_pedidos/${pedidoId}`).set({ status: 'processando', origem, destino, data, criadoEm: Date.now() });
-        console.log(`📥 Pedido ${pedidoId} enfileirado.`);
         res.status(202).json({ message: 'Busca em andamento.', pedidoId });
     } catch (error) {
         res.status(500).json({ error: 'Erro ao criar pedido.' });
@@ -116,93 +112,77 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ============================================================
-// WORKER (GERADOR UNIVERSAL DE VIAGENS)
+// WORKER DO RENDER (FALLBACK MATEMÁTICO)
 // ============================================================
-console.log('Worker iniciado. Gerador Universal de Viagens pronto...');
-
 db.ref('fila_pedidos').on('child_added', async (snapshot) => {
     const pedidoId = snapshot.key;
     const pedido = snapshot.val();
     if (pedido.status !== 'processando') return;
 
-    console.log(`\n⚙️ Gerando viagens para: ${pedido.origem} -> ${pedido.destino}`);
+    // ⏳ Espera 10 segundos para ver se o PC resolve
+    setTimeout(async () => {
+        const snapAtual = await db.ref(`fila_pedidos/${pedidoId}`).once('value');
+        const pedidoAtual = snapAtual.val();
+        if (pedidoAtual.status !== 'processando' && pedidoAtual.status !== 'erro_pc') return;
 
-    try {
-        const origem = pedido.origem.toLowerCase();
-        const destino = pedido.destino.toLowerCase();
-        const [origemCidade] = pedido.origem.split(',').map(s => s.trim());
-        const [destinoCidade] = pedido.destino.split(',').map(s => s.trim());
+        console.log(`\n⏳ PC não respondeu a tempo. Render gerando viagens (Fallback) para: ${pedido.origem} -> ${pedido.destino}`);
 
-        // 🔥 CALCULA A DISTÂNCIA (Tenta usar coordenadas, senão usa hash)
-        let distanciaKm = 0;
-        if (COORDENADAS[origem] && COORDENADAS[destino]) {
-            distanciaKm = calcularDistanciaHaversine(
-                COORDENADAS[origem][0], COORDENADAS[origem][1],
-                COORDENADAS[destino][0], COORDENADAS[destino][1]
-            );
-        } else {
-            distanciaKm = hashDistance(origem, destino);
-        }
-        console.log(`📏 Distância calculada: ${distanciaKm} km`);
+        try {
+            const origem = pedido.origem.toLowerCase();
+            const destino = pedido.destino.toLowerCase();
+            const [origemCidade] = pedido.origem.split(',').map(s => s.trim());
+            const [destinoCidade] = pedido.destino.split(',').map(s => s.trim());
 
-        // 🔥 Tabela de tarifas por km
-        const TARIFAS = { 'Convencional': 0.25, 'Executivo': 0.35, 'Semi-leito': 0.40, 'Leito': 0.45 };
-        const empresas = ['Catedral', 'Nacional', 'Gontijo', 'Expresso do Sul', 'Itapemirim', 'Águia Branca'];
-        const tipos = ['Convencional', 'Executivo', 'Semi-leito', 'Leito'];
-        
-        const qtdViagens = Math.floor(Math.random() * 3) + 3; 
-        const resultado = [];
+            let distanciaKm = COORDENADAS[origem] && COORDENADAS[destino] 
+                ? calcularDistanciaHaversine(COORDENADAS[origem][0], COORDENADAS[origem][1], COORDENADAS[destino][0], COORDENADAS[destino][1])
+                : hashDistance(origem, destino);
 
-        for (let i = 0; i < qtdViagens; i++) {
-            const empresa = empresas[Math.floor(Math.random() * empresas.length)];
-            const tipo = tipos[Math.floor(Math.random() * tipos.length)];
-            
-            const tarifaPorKm = TARIFAS[tipo];
-            let precoBase = distanciaKm * tarifaPorKm;
-            
-            // Mínimo de R$ 30 para viagens curtas
-            if (precoBase < 30) precoBase = 30 + (Math.random() * 10);
-            const precoFinal = Math.round(precoBase * (0.9 + Math.random() * 0.2) * 100) / 100;
+            const empresas = ['Catedral', 'Nacional', 'Gontijo', 'Expresso do Sul', 'Itapemirim', 'Águia Branca'];
+            const tipos = ['Convencional', 'Executivo', 'Semi-leito', 'Leito'];
+            const qtdViagens = Math.floor(Math.random() * 3) + 3; 
+            const resultado = [];
 
-            const horaSaida = Math.floor(Math.random() * 18) + 5;
-            const minutoSaida = Math.random() > 0.5 ? '30' : '00';
-            const timeSaida = `${String(horaSaida).padStart(2, '0')}:${minutoSaida}`;
-            
-            // Tempo de viagem baseado em 80km/h
-            const horasViagem = Math.max(1, Math.ceil(distanciaKm / 80));
-            const horaChegada = (horaSaida + horasViagem) % 24;
-            const timeChegada = `${String(horaChegada).padStart(2, '0')}:${minutoSaida}`;
+            for (let i = 0; i < qtdViagens; i++) {
+                const empresa = empresas[Math.floor(Math.random() * empresas.length)];
+                const tipo = tipos[Math.floor(Math.random() * tipos.length)];
+                let precoBase = calcularPrecoBase(distanciaKm, tipo);
+                const precoFinal = Math.round(precoBase * (0.95 + Math.random() * 0.1) * 100) / 100;
 
-            // Poltronas 35%
-            const totalAssentos = 46;
-            const qtdOcupadas = Math.floor(totalAssentos * 0.35);
-            const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
-            let seed = (pedidoId + i).toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            for (let k = todasPoltronas.length - 1; k > 0; k--) {
-                seed = (seed * 9301 + 49297) % 233280;
-                const j = Math.floor((seed / 233280) * (k + 1));
-                [todasPoltronas[k], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[k]];
+                const horaSaida = Math.floor(Math.random() * 18) + 5;
+                const minutoSaida = Math.random() > 0.5 ? '30' : '00';
+                const timeSaida = `${String(horaSaida).padStart(2, '0')}:${minutoSaida}`;
+                
+                const horasViagem = Math.max(1, Math.ceil(distanciaKm / 80));
+                const horaChegada = (horaSaida + horasViagem) % 24;
+                const timeChegada = `${String(horaChegada).padStart(2, '0')}:${minutoSaida}`;
+
+                const totalAssentos = 46;
+                const qtdOcupadas = Math.floor(totalAssentos * 0.35);
+                const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
+                let seed = (pedidoId + i).toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                for (let k = todasPoltronas.length - 1; k > 0; k--) {
+                    seed = (seed * 9301 + 49297) % 233280;
+                    const j = Math.floor((seed / 233280) * (k + 1));
+                    [todasPoltronas[k], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[k]];
+                }
+
+                resultado.push({
+                    id: uuidv4(),
+                    company: { name: empresa, logo: '' },
+                    price: precoFinal,
+                    bus_type: tipo,
+                    total_seats: totalAssentos,
+                    occupied_seats: todasPoltronas.slice(0, qtdOcupadas),
+                    departure: { time: timeSaida, city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } },
+                    arrival: { time: timeChegada, city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } }
+                });
             }
 
-            resultado.push({
-                id: uuidv4(),
-                company: { name: empresa, logo: '' },
-                price: precoFinal,
-                bus_type: tipo,
-                total_seats: totalAssentos,
-                occupied_seats: todasPoltronas.slice(0, qtdOcupadas),
-                departure: { time: timeSaida, city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } },
-                arrival: { time: timeChegada, city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } }
-            });
+            await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado, concluidoEm: Date.now() });
+        } catch (error) {
+            await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro no fallback.' });
         }
-
-        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'concluido', resultado, concluidoEm: Date.now() });
-        console.log(`✅ Viagens geradas com sucesso para ${pedidoId}.`);
-
-    } catch (error) {
-        console.error(`❌ Falha no pedido ${pedidoId}:`, error);
-        await db.ref(`fila_pedidos/${pedidoId}`).update({ status: 'erro', erro: 'Erro ao gerar viagens.' });
-    }
+    }, 10000); // 10 segundos
 });
 
 const PORT = process.env.PORT || 3000;
