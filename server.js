@@ -98,26 +98,53 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
 
             let viagens = response.data.data || response.data.trips || [];
             if (Array.isArray(viagens) && viagens.length > 0) {
-                resultado = viagens.map(trip => ({
-                    id: trip.id || Math.random().toString(),
-                    company: { name: trip.travelCompany?.name || trip.company?.name || "Viação Parceira", logo: trip.travelCompany?.logo || "" },
-                    price: Number(trip.price || 0),
-                    bus_type: trip.bus_type || "Convencional",
-                    total_seats: 46,
-                    occupied_seats: [],
-                    departure: { time: trip.departure?.time || "--:--", city: origemCidade, terminal: { name: trip.departure?.place?.name || "Terminal Principal", address: "" } },
-                    arrival: { time: trip.arrival?.time || "--:--", city: destinoCidade, terminal: { name: trip.arrival?.place?.name || "Terminal Principal", address: "" } }
-                }));
+                resultado = viagens.map(trip => {
+                    // 🔥 Lógica das poltronas aleatórias (35% exatos)
+                    const totalAssentos = 46;
+                    const qtdOcupadas = Math.floor(totalAssentos * 0.35);
+                    const todasPoltronas = Array.from({length: totalAssentos}, (_, i) => i + 1);
+                    
+                    let seed = (trip.id || "1").toString().split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                    for (let i = todasPoltronas.length - 1; i > 0; i--) {
+                        seed = (seed * 9301 + 49297) % 233280;
+                        const j = Math.floor((seed / 233280) * (i + 1));
+                        [todasPoltronas[i], todasPoltronas[j]] = [todasPoltronas[j], todasPoltronas[i]];
+                    }
+                    const ocupadas = todasPoltronas.slice(0, qtdOcupadas);
+
+                    return {
+                        id: trip.id || Math.random().toString(),
+                        company: { 
+                            name: trip.travelCompany?.name || trip.company?.name || "Viação Parceira", 
+                            logo: trip.travelCompany?.logo || trip.company?.logo || "" // Repassa a logo
+                        },
+                        price: Number(trip.price || 0),
+                        bus_type: trip.bus_type || "Convencional",
+                        total_seats: totalAssentos,
+                        occupied_seats: ocupadas,
+                        departure: { 
+                            time: trip.departure?.time || "--:--", 
+                            city: origemCidade, 
+                            terminal: { name: trip.departure?.place?.name || "Terminal Principal", address: "" } 
+                        },
+                        arrival: { 
+                            time: trip.arrival?.time || "--:--", 
+                            city: destinoCidade, 
+                            terminal: { name: trip.arrival?.place?.name || "Terminal Principal", address: "" } 
+                        }
+                    };
+                });
             }
         } catch (e) {
             console.error('❌ Erro na GeckoAPI:', e.response?.data || e.message);
         }
 
+        // Se falhou ou não achou nada, usa o Modo Demonstração
         if (!resultado || resultado.length === 0) {
             console.log('⚠️ GeckoAPI falhou ou não retornou. Usando Modo Demonstração.');
             resultado = [
-                { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [], departure: { time: '08:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } },
-                { id: 'demo-2', company: { name: 'Nacional', logo: '' }, bus_type: 'Convencional', price: 180.00, total_seats: 46, occupied_seats: [], departure: { time: '14:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } }
+                { id: 'demo-1', company: { name: 'Catedral', logo: '' }, bus_type: 'Executivo', price: 150.00, total_seats: 46, occupied_seats: [2, 5, 8, 12, 15, 22, 28, 33, 40, 41, 42, 43, 44, 45, 46, 47].slice(0, 16), departure: { time: '08:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } },
+                { id: 'demo-2', company: { name: 'Nacional', logo: '' }, bus_type: 'Convencional', price: 180.00, total_seats: 46, occupied_seats: [3, 7, 11, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36].slice(0, 16), departure: { time: '14:00', city: origemCidade, terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: destinoCidade, terminal: { name: 'Terminal Rodoviário', address: '' } } }
             ];
         }
 
