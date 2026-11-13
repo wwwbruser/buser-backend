@@ -11,7 +11,7 @@ app.use(express.json());
 // ============================================================
 // 🔑 CHAVE DA GECKOAPI (COLE A SUA CHAVE AQUI)
 // ============================================================
-const GECKO_API_KEY = "pk_live_IigOgQi7WIKJsTdtOkripDvJPCZ2F9wQ"; // <-- Substitua pelo seu token da GeckoAPI
+const GECKO_API_KEY = "pk_live_IigOgQi7WIKJsTdtOkripDvJPCZ2F9wQ"; // Substitua pelo seu token da GeckoAPI
 
 // ============================================================
 // 🔒 FIREBASE (BUSCA DAS VARIÁVEIS DE AMBIENTE DO RENDER)
@@ -28,7 +28,7 @@ if (!admin.apps.length) {
       credential: admin.credential.cert(serviceAccount),
       databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
     });
-    console.log("✅ Firebase Admin inicializado com sucesso.");
+    console.log("✅ Firebase Admin inicializado.");
   } catch (error) {
     console.error("❌ ERRO CRÍTICO no Firebase:", error.message);
   }
@@ -45,7 +45,6 @@ app.get('/api/clickbus/search', async (req, res) => {
     const pedidoId = uuidv4();
     try {
         await db.ref(`fila_pedidos/${pedidoId}`).set({ status: 'processando', origem, destino, data, criadoEm: Date.now() });
-        console.log(`📥 Pedido ${pedidoId} enfileirado.`);
         res.status(202).json({ message: 'Busca em andamento.', pedidoId });
     } catch (error) {
         console.error('Erro ao enfileirar:', error.message);
@@ -85,7 +84,6 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
 
         let resultado = null;
         try {
-            // 🔥 Chamada para a GeckoAPI usando a chave no código
             const response = await axios.post(
                 'https://api.geckoapi.com.br/v1/extract',
                 {
@@ -124,7 +122,6 @@ db.ref('fila_pedidos').on('child_added', async (snapshot) => {
             console.error('❌ Erro na GeckoAPI:', e.response?.data || e.message);
         }
 
-        // Se falhou ou não achou nada, usa o Modo Demonstração
         if (!resultado || resultado.length === 0) {
             console.log('⚠️ GeckoAPI falhou ou não retornou. Usando Modo Demonstração.');
             resultado = [
