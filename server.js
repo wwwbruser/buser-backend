@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Simulação da fila em memória
+// Fila na memória (super rápido e sem erros)
 const filaPedidos = {};
 
 app.get('/api/clickbus/search', (req, res) => {
@@ -16,16 +16,25 @@ app.get('/api/clickbus/search', (req, res) => {
     const pedidoId = uuidv4();
     filaPedidos[pedidoId] = { status: 'processando', origem, destino, data };
     
-    // Responde na hora
     res.status(202).json({ message: 'Busca em andamento.', pedidoId });
 
-    // Gera as viagens após 2 segundos (simulando o Worker)
+    // Gera as viagens após 2 segundos
     setTimeout(() => {
         filaPedidos[pedidoId] = {
             status: 'concluido',
-            resultado: [
-                { id: uuidv4(), company: { name: 'Catedral', logo: '' }, price: 150.00, bus_type: 'Executivo', total_seats: 46, occupied_seats: [2,5,8,12,15], departure: { time: '08:00', city: origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '14:15', city: destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } },
-                { id: uuidv4(), company: { name: 'Nacional', logo: '' }, price: 180.00, bus_type: 'Convencional', total_seats: 46, occupied_seats: [3,7,11,19,25], departure: { time: '14:00', city: origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, arrival: { time: '19:45', city: destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } }
+            data: [ // <--- AQUI É A CORREÇÃO: O frontend espera a palavra "data"
+                { 
+                    id: uuidv4(), company: { name: 'Catedral', logo: '' }, price: 150.00, bus_type: 'Executivo', 
+                    total_seats: 46, occupied_seats: [2,5,8,12,15,22,28,33,40,41,42,43,44,45,46,4], 
+                    departure: { time: '08:00', city: origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, 
+                    arrival: { time: '14:15', city: destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } 
+                },
+                { 
+                    id: uuidv4(), company: { name: 'Nacional', logo: '' }, price: 180.00, bus_type: 'Convencional', 
+                    total_seats: 46, occupied_seats: [3,7,11,19,25,26,27,29,30,31,32,34,35,36,37,38], 
+                    departure: { time: '14:00', city: origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, 
+                    arrival: { time: '19:45', city: destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } 
+                }
             ]
         };
     }, 2000);
@@ -34,8 +43,8 @@ app.get('/api/clickbus/search', (req, res) => {
 app.get('/api/clickbus/resultado/:pedidoId', (req, res) => {
     const pedido = filaPedidos[req.params.pedidoId];
     if (!pedido) return res.status(404).json({ error: 'Não encontrado' });
-    res.json(pedido);
+    res.json(pedido); // Envia o objeto com { status: 'concluido', data: [...] }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor simples rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
