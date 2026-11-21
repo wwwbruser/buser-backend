@@ -1,118 +1,118 @@
 const express = require('express');
-const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
+const cors = require('cors');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const filaPedidos = {};
+// ==========================================
+// CONFIGURAÇÕES DO PROXY GTI (Mude aqui ou use variáveis de ambiente no Render)
+// ==========================================
+const PROXY_HOST = process.env.PROXY_HOST || 'IP_DO_PROXY_AQUI';
+const PROXY_PORT = process.env.PROXY_PORT || 'PORTA_AQUI';
+const PROXY_USER = process.env.PROXY_USER || 'msantanamiranda7@gmail.com';
+const PROXY_PASS = process.env.PROXY_PASS || 'x2dgvd';
 
+// Monta a URL do proxy para o Axios
+const proxyUrl = `http://${PROXY_USER}:${PROXY_PASS}@${PROXY_HOST}:${PROXY_PORT}`;
+const httpsAgent = new HttpsProxyAgent(proxyUrl);
+
+// ==========================================
+// MEMÓRIA PARA GUARDAR OS PEDIDOS (Fila de busca)
+// ==========================================
+const pedidos = {};
+
+// Rota 1: O frontend chama isso quando clica em "Buscar"
 app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
-    if (!origem || !destino || !data) return res.status(400).json({ error: 'Faltando parâmetros.' });
 
-    const pedidoId = uuidv4();
-    filaPedidos[pedidoId] = { status: 'processando' };
-    
-    res.status(202).json({ message: 'Busca em andamento.', pedidoId });
-
-    try {
-        const [origemCidade, origemUF] = origem.split(',').map(s => s.trim());
-        const [destinoCidade, destinoUF] = destino.split(',').map(s => s.trim());
-
-        console.log(`\n📡 Buscando viagens REAIS para: ${origemCidade}-${origemUF} -> ${destinoCidade}-${destinoUF}`);
-
-        const proxyUrl = process.env.PROXY_URL;
-        let agent = null;
-        if (proxyUrl) {
-            agent = new HttpsProxyAgent(proxyUrl);
-            console.log('✅ Usando Proxy GTI.');
-        }
-
-        // Chamada para a GeckoAPI
-        const response = await axios.post(
-            'https://api.geckoapi.com.br/v1/extract',
-            {
-                target: 'clickbus.com.br',
-                type: 'plp',
-                originCity: origemCidade,
-                originState: origemUF.toUpperCase(),
-                destinationCity: destinoCidade,
-                destinationState: destinoUF.toUpperCase(),
-                departureDate: data,
-                page: 1
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.GECKO_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                httpsAgent: agent,
-                timeout: 60000
-            }
-        );
-
-        // 🔥 O ESPIÃO: Vai imprimir o JSON inteiro da GeckoAPI no log do Render
-        console.log('\n[DEBUG GECKO] Resposta crua:', JSON.stringify(response.data).substring(0, 1500));
-
-        // Tenta ler as viagens de todos os lugares possíveis
-        let viagens = [];
-        if (response.data) {
-            if (Array.isArray(response.data)) viagens = response.data;
-            else if (response.data.data && Array.isArray(response.data.data)) viagens = response.data.data;
-            else if (response.data.data && response.data.data.items) viagens = response.data.data.items;
-            else if (response.data.items) viagens = response.data.items;
-            else if (response.data.trips) viagens = response.data.trips;
-        }
-
-        if (viagens.length > 0) {
-            console.log(`✅ GeckoAPI retornou ${viagens.length} viagens reais!`);
-            
-            const resultadoReal = viagens.map(trip => ({
-                id: trip.id || uuidv4(),
-                company: { name: trip.travelCompany?.name || trip.company?.name || "Viação", logo: trip.travelCompany?.logo || "" },
-                price: Number(trip.price || 0),
-                bus_type: trip.bus_type || "Convencional",
-                total_seats: 46,
-                occupied_seats: [2,5,8,12,15,22,28,33,40,41,42,43,44,45,46,4], 
-                departure: { time: trip.departure?.time || "--:--", city: origemCidade, terminal: { name: trip.departure?.place?.name || "Terminal Principal", address: "" } },
-                arrival: { time: trip.arrival?.time || "--:--", city: destinoCidade, terminal: { name: trip.arrival?.place?.name || "Terminal Principal", address: "" } }
-            }));
-
-            filaPedidos[pedidoId] = { status: 'concluido', data: resultadoReal };
-            return; 
-        } else {
-            console.log('⚠️ O JSON acima não contém viagens no formato esperado. Usando fallback.');
-        }
-
-    } catch (error) {
-        console.error('❌ Erro na GeckoAPI:', error.response?.data || error.message);
+    if (!origem || !destino || !data) {
+        return res.status(400).json({ error: 'Faltando parâmetros: origem, destino, data' });
     }
 
-    // FALLBACK
-    setTimeout(() => {
-        filaPedidos[pedidoId] = {
-            status: 'concluido',
-            data: [
-                { 
-                    id: uuidv4(), company: { name: 'Catedral', logo: '' }, price: 150.00, bus_type: 'Executivo', 
-                    total_seats: 46, occupied_seats: [2,5,8,12,15,22,28,33,40,41,42,43,44,45,46,4], 
-                    departure: { time: '08:00', city: origem.split(',')[0], terminal: { name: 'Rodoviária Principal', address: '' } }, 
-                    arrival: { time: '14:15', city: destino.split(',')[0], terminal: { name: 'Terminal Rodoviário', address: '' } } 
-                }
-            ]
-        };
-    }, 1500);
+    // Cria um ID único para esse pedido
+    const pedidoId = Date.now().toString() + Math.floor(Math.random() * 1000);
+    
+    // Salva na memória como "processando"
+    pedidos[pedidoId] = {
+        status: 'processando',
+        data: null,
+        error: null
+    };
+
+    // Responde rápido para o frontend (Ele vai começar a fazer polling)
+    res.json({ pedidoId });
+
+    // Inicia a busca em background (não trava a resposta)
+    buscarViagensGeckoAPI(origem, destino, data, pedidoId);
 });
 
+// Rota 2: O frontend fica perguntando "já acabou?" aqui a cada 1 segundo
 app.get('/api/clickbus/resultado/:pedidoId', (req, res) => {
-    const pedido = filaPedidos[req.params.pedidoId];
-    if (!pedido) return res.status(404).json({ error: 'Não encontrado' });
+    const { pedidoId } = req.params;
+    const pedido = pedidos[pedidoId];
+
+    if (!pedido) {
+        return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
     res.json(pedido);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+
+// ==========================================
+// FUNÇÃO QUE FAZ O SCRAPING NA GECKOAPI
+// ==========================================
+async function buscarViagensGeckoAPI(origem, destino, data, pedidoId) {
+    console.log(`[${pedidoId}] Buscando viagens REAIS para: ${origem} -> ${destino} em ${data}`);
+
+    try {
+        // ATENÇÃO: Substitua pela URL real da GeckoAPI que você estava usando
+        // Exemplo: const apiUrl = `https://api.gecko.com/search?origem=${origem}...`
+        const apiUrl = `https://sua-api-da-gecko-aqui.com/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
+
+        const response = await axios.get(apiUrl, {
+            httpsAgent: httpsAgent, // Usa o Proxy GTI
+            proxy: false, // Desativa o proxy padrão do axios para usar o httpsAgent
+            timeout: 30000, // 30 segundos de timeout (proxy móvel pode ser lento)
+            headers: {
+                // Headers cruciais para simular um celular real
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+                'Referer': 'https://www.buser.com.br/',
+                'Origin': 'https://www.buser.com.br'
+            }
+        });
+
+        console.log(`[${pedidoId}] Sucesso! Viagens encontradas:`, response.data.length || 'desconhecido');
+
+        // Atualiza o pedido para concluído com os dados
+        pedidos[pedidoId] = {
+            status: 'concluido',
+            data: response.data, // Aqui vão os dados reais
+            error: null
+        };
+
+    } catch (error) {
+        console.error(`[${pedidoId}] Erro na GeckoAPI:`, error.message);
+        
+        // Se o proxy falhar, registra o erro no pedido
+        pedidos[pedidoId] = {
+            status: 'erro',
+            data: null,
+            message: 'Erro ao conectar com a operadora. Tente novamente.'
+        };
+    }
+}
+
+// ==========================================
+// INICIALIZAÇÃO DO SERVIDOR (Render usa a porta 10000)
+// ==========================================
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+    console.log(`Usando Proxy: ${PROXY_HOST}:${PROXY_PORT}`);
+});
