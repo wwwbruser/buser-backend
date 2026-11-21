@@ -18,38 +18,38 @@ app.listen(PORT, () => {
 });
 
 // ============================================================
-// 2. FIREBASE (JÁ COM A SUA CHAVE REAL COLADA AQUI)
+// 2. FIREBASE (Lendo da variável FIREBASE_CREDENTIALS)
 // ============================================================
-const serviceAccount = {
-  "type": "service_account",
-  "project_id": "projeto-link-ddbf0",
-  "private_key_id": "d61922cc005ce77e5faf8bccf89a2e7b7c6cc995",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCzXPX9Vn98raKq\nlJo+Rd7+6fVM1OEd9IiyIdlrZMABJ3ihayHBglT6IfjeDvMAarod6PqCrlYvdY2c\nhLwt6do0jovquFPSeZLwXu2hNKEyGmxFE7ZW1a//laXRxDlXhkyGTlPiARKbhdZl\njOf90AnJIRPk+MYeeezYTajN3dLq0Siiwj7ZQeNWwKyBpdQ1RIs5dU3ujYsy8Ihq\nY62U6wXt3w5vC9MxCki2jB89UqjZL2XZ+p0G/A6WizH7al4Y+GMgTkk8wEneT9Yk\nloivSrG/FXsu2bHdSEiZY3L103n8+VY44zmlm7k45i8t6GCPg8tOMhzkR6ymAqoA\n5tGS7/fXAgMBAAECggEAFMNNnIp/To0BGBMEufG3qzWlFkRMXP3aNxixBPwQN/H8\nRl9S9IYkVSJKn1YGrkUsj1rRaQBKbMsEXhqFeCEqh8v6iWzWEzbMmjO6+V7QzC5/\n2w05ndq1uXX20I4Q/z9GK4P0tORf5Y38MBw8HMcQ4u4H0gk0UgHWN4Hh6RblHBZx\nq3DJ1tBI3nSaHLqZ1poEgZDkxofvK87uNIc2imZhfDkp6ClNa7rqB+R8Vw4Mw3bj\nzt9+FF5Uy5+S3plY26Yxb0eyX1JmUYBIEhty4PC+yAJbLxQsyB+1iRg8MEFEIDWP\nfLOgNB1nh/fGEu1vVWlOV9bjlUpGfL1hSo2YPRSOQQKBgQDYDGQrMAjm+30b1QXX\nZEFmbmT9Vvn+eFEQmK3pA/Qi3IOtAWgkK5JopS74C+IOZfomWvPdjfpL2vaQlvHS\nw3vYLnXDrvWHyyShQPnAmDopGMeuHrosBXchZFOlSvWpbw8z18uRZq3Aa3Q7MaSd\np+0NDEMkBSmmQS9SadGdGOJjwQKBgQDUh+jXFjqZbWtUkJferRRiIyOsJHwf3LfM\nEBa/B0Yn5wDF7JyPlmv9D4Hkg2h6I7fuEAxveFFxJBLiaV+TNpvfEd1TOU3quRou\nJN96NlusrgbUn7WSJkoR54rTM6qyQMCWr78ICY8/Q73o5MdJiDkg2mG4xLvwMI9y\np71KqFthlwKBgFDwE3a6gBtIjA4pOA8BWB7vrJXcR7u1h2kYSc7J1GRbCFl/9WvX\nhvn9KCN1EDMksRo9aK7Pyb0xQr3YTrAO3A6ZGTU+Dm3ZBNgEZ4xneyJ6ThRFHqnv\nQjoYQ93gvzfCi4d4iKLoPJ+hoeGrL2iAyKXiuiR8aqYGNZxCWGzqLaYBAoGAYgK3\nRxGSPpUuTRZNYzxwTP2lgspkj5ELFclJpBjnqpkmSyBd5v3YmSBgp5BOSx1Twi6W\nfYWAEWwwZUdw8wPZCBtF9Q5VN2zbfPI2OTb+OfkbX0yzwE12FSGxbMrD6mZgKl2r\n/DnkXKmR1+hBW1C9/7+WF05q2U6bqKVgbyCK28sCgYEA0BdgTHMFwBx5K+SqUOkm\nBIcI1clVms5YE51kj0ojqqnbH6pDReadQKDpegFm0+g5St/2mv0HaIAmADlA7pM+\nrfLJHKr7Tjga2rNG8eHmeDkTW7L3Ts4EJXZ1RUomnC9XG6m3n06cSSGF2Q+uzOIN\nsbGU+TjbYLahGQ+7rvstHkI=\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-fbsvc@projeto-link-ddbf0.iam.gserviceaccount.com",
-  "client_id": "111553288974699411914",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40projeto-link-ddbf0.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-};
+let db; 
 
 try {
+    // Pega o JSON do Render. 
+    // DICA: No Render, cole o JSON puro na variável FIREBASE_CREDENTIALS.
+    const serviceAccountString = process.env.FIREBASE_CREDENTIALS;
+    
+    if (!serviceAccountString) {
+        throw new Error("A variável FIREBASE_CREDENTIALS não está configurada no Render.");
+    }
+
+    const serviceAccount = JSON.parse(serviceAccountString);
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
       databaseURL: "https://projeto-link-ddbf0-default-rtdb.firebaseio.com"
     });
-    console.log('✅ Firebase inicializado com sucesso.');
-} catch (e) {
-    console.error('❌ ERRO no Firebase:', e.message);
-}
 
-const db = admin.database();
+    db = admin.database();
+    console.log('✅ Firebase inicializado com sucesso.');
+
+} catch (e) {
+    console.error('❌ ERRO FATAL no Firebase:', e.message);
+    console.error('Verifique se o JSON está perfeitamente colado no Render.');
+    process.exit(1); // Para o app se o Firebase falhar
+}
 
 // ============================================================
 // 3. CONFIGURAÇÃO DO PROXY GTI 
 // ============================================================
-// Vou deixar os dados fixos aqui para você não ter dor de cabeça
 const PROXY_HOST = 'srv.gtiproxy.com';
 const PROXY_PORT = '8049';
 const PROXY_USER = 'gt1efa37d76ab';
