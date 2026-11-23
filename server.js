@@ -3,7 +3,7 @@ const cors = require('cors');
 const admin = require('firebase-admin');
 
 // ==========================================
-// 1. CONFIGURAÇÃO DO FIREBASE (CHAVE NO CÓDIGO)
+// 1. CONFIGURAÇÃO DO FIREBASE
 // ==========================================
 try {
   const serviceAccount = {
@@ -24,7 +24,7 @@ try {
 }
 
 // ==========================================
-// 2. CONFIGURAÇÃO DO SERVIDOR
+// 2. CONFIGURAÇÃO DO SERVIDOR E CORS
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -32,48 +32,33 @@ const PORT = process.env.PORT || 10000;
 app.use(cors({
   origin: 'https://wwwbruser.github.io'
 }));
-
 app.use(express.json());
 
-// Rota de teste
+// Rota raiz (para testes rápidos)
 app.get('/', (req, res) => {
   res.send('Servidor Buser está rodando!');
 });
 
 // ==========================================
-// 3. ROTA QUE O SEU SITE ESTÁ PEDINDO
+// 3. ROTA QUE O SITE ESTÁ PEDINDO
 // ==========================================
 app.get('/api/clicksbus/search', async (req, res) => {
   try {
-    // Pega os parâmetros que o site enviou na URL (origem, destino, data)
     const { origem, destino, data } = req.query;
-    
-    console.log(`🔍 Busca recebida: Origem=${origem}, Destino=${destino}, Data=${data}`);
+    console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
-    // AQUI VOCÊ COLOCA A LÓGICA PARA BUSCAR NO FIREBASE
-    // Por enquanto, vou retornar um JSON vazio para o site não quebrar
-    
-    const viagensEncontradas = []; 
+    // ⚠️ AQUI ENTRA A LÓGICA DO FIREBASE
+    // Por enquanto, retornamos uma lista vazia para o site parar de dar erro 404
+    const viagens = [];
 
-    // Se você já tiver dados no Firebase, pode descomentar o código abaixo:
-    /*
-    const db = admin.database();
-    const ref = db.ref('viagens'); // Troque 'viagens' pelo nó correto do seu banco
-    const snapshot = await ref.once('value');
-    const todasViagens = snapshot.val();
-    // ... lógica para filtrar por origem, destino e data ...
-    */
-
-    // Retorna o JSON que o site espera
     res.json({
       sucesso: true,
-      viagens: viagensEncontradas,
-      mensagem: "Rota de busca funcionando! Nenhuma viagem cadastrada ainda."
+      viagens: viagens,
+      mensagem: "Nenhuma passagem encontrada (lista vazia)."
     });
-    
   } catch (error) {
     console.error("Erro na busca:", error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
