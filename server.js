@@ -41,7 +41,44 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 3. INICIALIZAÇÃO
+// 3. ROTA QUE O SEU SITE ESTÁ PEDINDO
+// ==========================================
+app.get('/api/clicksbus/search', async (req, res) => {
+  try {
+    // Pega os parâmetros que o site enviou na URL (origem, destino, data)
+    const { origem, destino, data } = req.query;
+    
+    console.log(`🔍 Busca recebida: Origem=${origem}, Destino=${destino}, Data=${data}`);
+
+    // AQUI VOCÊ COLOCA A LÓGICA PARA BUSCAR NO FIREBASE
+    // Por enquanto, vou retornar um JSON vazio para o site não quebrar
+    
+    const viagensEncontradas = []; 
+
+    // Se você já tiver dados no Firebase, pode descomentar o código abaixo:
+    /*
+    const db = admin.database();
+    const ref = db.ref('viagens'); // Troque 'viagens' pelo nó correto do seu banco
+    const snapshot = await ref.once('value');
+    const todasViagens = snapshot.val();
+    // ... lógica para filtrar por origem, destino e data ...
+    */
+
+    // Retorna o JSON que o site espera
+    res.json({
+      sucesso: true,
+      viagens: viagensEncontradas,
+      mensagem: "Rota de busca funcionando! Nenhuma viagem cadastrada ainda."
+    });
+    
+  } catch (error) {
+    console.error("Erro na busca:", error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
+// ==========================================
+// 4. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
