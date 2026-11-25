@@ -28,18 +28,22 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Middleware de CORS Manual e Dinâmico
+// MIDDLEWARE DE CORS DEFINITIVO (Deve ser o primeiro)
 app.use((req, res, next) => {
-  // Pega a origem da requisição. Se não houver, usa um padrão.
-  const origin = req.headers.origin || 'https://www.bruser.github.io';
+  // Pega a origem exata que o navegador mandou (seja wwwbruser, www.bruser, etc)
+  const origin = req.headers.origin;
   
-  // Define o cabeçalho de permissão com a origem exata da requisição.
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  // Se o navegador mandou uma origem, devolvemos exatamente ela. Isso mata o erro de CORS.
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  // Permite os métodos e cabeçalhos que o seu front-end usa
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-  // Responde imediatamente a requisições de "preflight" (OPTIONS)
+  // Responde imediatamente as requisições "OPTIONS" (preflight) que o navegador faz antes do GET
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -49,15 +53,15 @@ app.use((req, res, next) => {
 // Permite que o Express entenda JSON
 app.use(express.json());
 
-// Middleware de log para vermos as requisições no Render
+// Middleware para logar no Render (ajuda a ver se a requisição chegou)
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] Requisição: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'N/A'}`);
   next();
 });
 
-// Rota raiz para teste
+// Rota raiz (para testes se o servidor está de pé)
 app.get('/', (req, res) => {
-  res.send('Servidor Buser está rodando com CORS dinâmico!');
+  res.send('Servidor Buser está rodando com CORS manual configurado!');
 });
 
 // ==========================================
@@ -68,6 +72,8 @@ app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
+    // Por enquanto estamos simulando a resposta.
+    // Quando você for usar o proxy, é aqui dentro que você faz a chamada real.
     const pedidoId = "simulacao_" + Date.now();
 
     res.json({
@@ -76,7 +82,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
   } catch (error) {
     console.error("Erro na busca:", error);
-    res.status(500).json({ error: 'Erro interno' });
+    res.status(500).json({ error: 'Erro interno no servidor' });
   }
 });
 
@@ -85,19 +91,30 @@ app.get('/api/clickbus/search', async (req, res) => {
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
+    // Simulando retorno de lista vazia
     res.json({
       status: 'concluido',
-      data: [],
+      data: [], 
       mensagem: "Nenhuma passagem encontrada."
     });
   } catch (error) {
     console.error("Erro no resultado:", error);
-    res.status(500).json({ error: 'Erro interno' });
+    res.status(500).json({ error: 'Erro interno no servidor' });
   }
 });
 
 // ==========================================
-// 5. INICIALIZAÇÃO
+// 5. TRATAMENTO DE ERROS (Para não retornar HTML no Front)
+// ==========================================
+app.use((req, res, next) => {
+  if (req.originalUrl.startsWith('/api')) {
+    return res.status(404).json({ error: 'Rota da API não encontrada.' });
+  }
+  res.status(404).send('Página não encontrada.');
+});
+
+// ==========================================
+// 6. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
