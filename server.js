@@ -51,7 +51,6 @@ app.get('/', (req, res) => {
 // ==========================================
 // 3. CONFIGURAÇÃO DO PROXY GTIPROXY
 // ==========================================
-// Aqui estão as suas credenciais. O Axios vai usar isso para rotear a conexão.
 const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
@@ -65,18 +64,14 @@ app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens REAIS de ${origem} para ${destino} na data ${data}`);
 
-    // ---------------------------------------------------------
-    // ⚠️ ATENÇÃO: VOCÊ PRECISA DESCOBRIR A URL REAL DO CLICKBUS
-    // Abaixo está um exemplo. Se você não trocar por uma URL válida que devolva JSON, vai dar erro.
-    // ---------------------------------------------------------
-    const urlClickbus = `https://www.clickbus.com.br/api/v1/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
+    // URL CORRIGIDA DO CLICKBUS (v4)
+    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${encodeURIComponent(origem)}&to=${encodeURIComponent(destino)}&departure_date=${data}`;
 
     console.log(`⏳ Chamando o ClickBus através do Proxy GTIPROXY...`);
     
-    // Faz a requisição usando o Axios + o Proxy Agent
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
-      timeout: 20000, // 20 segundos de limite
+      timeout: 25000, // 25 segundos de limite
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*'
@@ -86,7 +81,7 @@ app.get('/api/clickbus/search', async (req, res) => {
     const dadosReais = response.data;
     console.log("✅ Dados recebidos com sucesso do Proxy!");
 
-    // Verifica se o que voltou é realmente um JSON (e não uma página de erro HTML)
+    // Se o ClickBus retornar HTML (bloqueio do Cloudflare), avisamos
     if (typeof dadosReais === 'string' && dadosReais.includes('<!DOCTYPE html>')) {
         throw new Error("O ClickBus retornou HTML (provavelmente bloqueou o proxy).");
     }
@@ -100,7 +95,12 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Erro na busca real:", error.message);
+    if (error.response) {
+        // O servidor respondeu com um status fora do range 2xx
+        console.error(`❌ Erro do ClickBus: Status ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+    } else {
+        console.error("❌ Erro na busca real:", error.message);
+    }
     res.status(500).json({ error: 'Erro ao buscar no ClickBus. Verifique os logs.' });
   }
 });
@@ -119,8 +119,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 
     res.json({
       status: 'concluido',
-      // Ajuste o caminho abaixo dependendo de como o ClickBus devolve o JSON
-      data: dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || dadosDaViagem, 
+      data: dadosDaViagem.trips || dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || dadosDaViagem, 
       mensagem: "Busca concluída."
     });
 
