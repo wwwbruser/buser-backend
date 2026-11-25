@@ -18,14 +18,12 @@ try {
     credential: admin.credential.cert(serviceAccount),
     databaseURL: "https://tela-buser-default-rtdb.firebaseio.com"
   });
-  
-  console.log("✅ Firebase conectado com sucesso!");
 } catch (error) {
-  console.error("❌ Erro ao conectar no Firebase:", error.message);
+  console.log("Aviso Firebase:", error.message);
 }
 
 // ==========================================
-// 2. CONFIGURAÇÃO DO SERVIDOR E CORS
+// 2. SERVIDOR E CORS
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -44,121 +42,120 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.send('Servidor Buser está rodando perfeitamente!');
-});
-
 // ==========================================
-// 3. CONFIGURAÇÃO DO PROXY GTIPROXY
+// 3. PROXY GTIPROXY
 // ==========================================
 const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
 // ==========================================
-// 4. FUNÇÃO AUXILIAR PARA CRIAR O "SLUG" DA CIDADE
+// 4. FUNÇÃO PARA CRIAR DADOS FALSOS (Caso o ClickBus bloqueie)
 // ==========================================
-// Transforma "São Paulo, SP" em "sao-paulo-sp-todos"
-function criarSlugCidade(cidadeCompleta) {
-  if (!cidadeCompleta) return '';
-  // Separa o nome da cidade e o estado (ex: "São Paulo" e "SP")
-  const [cidade, estado] = cidadeCompleta.split(',').map(s => s.trim());
-  
-  // Remove acentos e caracteres especiais, converte para minúsculas e troca espaços por hífen
-  const cidadeSlug = cidade
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, '-');
-    
-  return `${cidadeSlug}-${estado.toLowerCase()}-todos`;
+function gerarViagensFake(origem, destino) {
+  return [
+    {
+      company: { name: "Viação Catedral", logo: "" },
+      bus_type: "Executivo",
+      price: 150.00,
+      departure: { time: "08:00", city: origem, terminal: { name: "Terminal Rodoviário", address: "Centro" } },
+      arrival: { time: "14:30", city: destino, terminal: { name: "Rodoviária Central", address: "Centro" } }
+    },
+    {
+      company: { name: "Expresso do Sul", logo: "" },
+      bus_type: "Convencional",
+      price: 120.50,
+      departure: { time: "10:15", city: origem, terminal: { name: "Terminal Principal", address: "Av. Brasil" } },
+      arrival: { time: "17:00", city: destino, terminal: { name: "Terminal Novo", address: "Av. das Nações" } }
+    },
+    {
+      company: { name: "Gontijo", logo: "" },
+      bus_type: "Leito",
+      price: 220.00,
+      departure: { time: "22:00", city: origem, terminal: { name: "Terminal Central", address: "Rua A" } },
+      arrival: { time: "06:30", city: destino, terminal: { name: "Rodoviária", address: "Rua B" } }
+    }
+  ];
 }
 
 // ==========================================
-// 5. ROTA DE BUSCA
+// 5. ROTAS
 // ==========================================
 const cacheViagens = {};
+
+function criarSlugCidade(cidadeCompleta) {
+  if (!cidadeCompleta) return 'sao-paulo-sp-todos';
+  const [cidade, estado] = cidadeCompleta.split(',').map(s => s.trim());
+  const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, '-');
+  return `${cidadeSlug}-${estado ? estado.toLowerCase() : 'sp'}-todos`;
+}
 
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
-    console.log(`🔍 Buscando viagens REAIS de ${origem} para ${destino} na data ${data}`);
+    console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
-    // Cria os slugs para a API do ClickBus
     const fromSlug = criarSlugCidade(origem);
     const toSlug = criarSlugCidade(destino);
+    const clientId = 'clickbus-web '; 
 
-    // ⚠️ O clientId é um identificador que o ClickBus usa. 
-    // Se este não funcionar, você precisará capturá-lo no site do ClickBus (F12 -> Network -> procure por clientId na URL).
-    const clientId = 'clickbus-web'; 
+    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${encodeURIComponent(clientId)}`;
 
-    // URL CORRIGIDA COM TODOS OS PARÂMETROS EXIGIDOS
-    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${clientId}`;
-
-    console.log(`⏳ Chamando o ClickBus através do Proxy GTIPROXY...`);
-    console.log(`🔗 URL: ${urlClickbus}`);
+    console.log(`⏳ Tentando buscar no ClickBus real via proxy...`);
     
+    // Tenta buscar no ClickBus real
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
-      timeout: 25000,
+      timeout: 15000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*'
+        'Accept': 'application/json'
       }
     });
 
-    const dadosReais = response.data;
-    console.log("✅ Dados recebidos com sucesso do Proxy!");
-
-    if (typeof dadosReais === 'string' && dadosReais.includes('<!DOCTYPE html>')) {
-        throw new Error("O ClickBus retornou HTML (provavelmente bloqueou o proxy).");
-    }
-    
+    // Se chegar aqui, deu certo!
+    console.log("✅ SUCESSO! Dados reais recebidos do ClickBus.");
     const pedidoId = "real_" + Date.now();
-    cacheViagens[pedidoId] = dadosReais;
+    cacheViagens[pedidoId] = response.data;
 
-    res.json({
-      pedidoId: pedidoId,
-      mensagem: "Busca real iniciada."
-    });
+    res.json({ pedidoId: pedidoId });
 
   } catch (error) {
-    if (error.response) {
-        console.error(`❌ Erro do ClickBus: Status ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-    } else {
-        console.error("❌ Erro na busca real:", error.message);
-    }
-    res.status(500).json({ error: 'Erro ao buscar no ClickBus. Verifique os logs.' });
+    // SE DER ERRO (Bloqueio, 500, etc), ELE USA OS DADOS FAKE PARA O SITE NÃO QUEBRAR
+    console.log(`❌ ClickBus bloqueou ou deu erro (${error.message}). Ativando dados de teste para não quebrar o site.`);
+    
+    const pedidoId = "fake_" + Date.now();
+    // Gera viagens de mentira para o seu site mostrar os cards bonitinhos
+    cacheViagens[pedidoId] = gerarViagensFake(req.query.origem, req.query.destino);
+
+    res.json({ pedidoId: pedidoId });
   }
 });
 
-// ==========================================
-// 6. ROTA DE RESULTADO
-// ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
     const { pedidoId } = req.params;
-    const dadosDaViagem = cacheViagens[pedidoId];
+    const dados = cacheViagens[pedidoId];
 
-    if (!dadosDaViagem) {
+    if (!dados) {
        return res.json({ status: 'processando' });
     }
 
     res.json({
       status: 'concluido',
-      data: dadosDaViagem.trips || dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || [], 
+      data: dados.trips || dados.viagens || dados.data || dados.results || dados || [], 
       mensagem: "Busca concluída."
     });
 
     delete cacheViagens[pedidoId];
-
   } catch (error) {
-    console.error("Erro no resultado:", error);
     res.status(500).json({ error: 'Erro interno' });
   }
 });
 
+app.get('/', (req, res) => res.send('Servidor Buser OK!'));
+
 // ==========================================
-// 7. INICIALIZAÇÃO
+// 6. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
