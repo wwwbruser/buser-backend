@@ -1,5 +1,4 @@
 const express = require('express');
-const cors = require('cors');
 const admin = require('firebase-admin');
 
 // ==========================================
@@ -24,46 +23,48 @@ try {
 }
 
 // ==========================================
-// 2. CONFIGURAÇÃO DO SERVIDOR E CORS
+// 2. CONFIGURAÇÃO DO SERVIDOR E CORS MANUAL
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Libera o acesso explícito para o seu front-end e ambientes locais
-app.use(cors({
-  origin: [
-    'https://www.bruser.github.io',
-    'https://bruser.github.io',
-    'http://localhost:3000',
-    'http://127.0.0.1:5500'
-  ],
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Permite que o Express entenda JSON no corpo das requisições
-app.use(express.json());
-
-// Middleware para logar no Render todas as requisições que chegam
+// Middleware de CORS MANUAL (Garante que os cabeçalhos sejam enviados)
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] Requisição recebida: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'Desconhecida'}`);
+  // Permite a origem exata do seu front-end
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.bruser.github.io');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  // Responde imediatamente a requisições de "preflight" (OPTIONS)
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
   next();
 });
 
-// Rota raiz (para testes)
+// Permite que o Express entenda JSON
+app.use(express.json());
+
+// Middleware de log para vermos as requisições no Render
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] Requisição: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'N/A'}`);
+  next();
+});
+
+// Rota raiz para teste
 app.get('/', (req, res) => {
-  res.send('Servidor Buser está rodando!');
+  res.send('Servidor Buser está rodando com CORS manual!');
 });
 
 // ==========================================
-// 3. ROTA DE BUSCA (O site pede essa)
+// 3. ROTA DE BUSCA
 // ==========================================
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
-    // Simulando um ID de pedido para o site começar o monitoramento
     const pedidoId = "simulacao_" + Date.now();
 
     res.json({
@@ -77,16 +78,13 @@ app.get('/api/clickbus/search', async (req, res) => {
 });
 
 // ==========================================
-// 4. ROTA DE RESULTADO (O site pede essa logo depois)
+// 4. ROTA DE RESULTADO
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
-    // Aqui você colocaria a lógica real de pegar as viagens
-    // Por enquanto, retornamos "concluido" e uma lista vazia para o site não travar
-    
     res.json({
       status: 'concluido',
-      data: [], // Lista vazia significa "Nenhuma passagem encontrada" no frontend
+      data: [],
       mensagem: "Nenhuma passagem encontrada."
     });
   } catch (error) {
@@ -96,18 +94,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ==========================================
-// 5. TRATAMENTO DE ROTAS NÃO ENCONTRADAS (Evita erro de HTML)
-// ==========================================
-app.use((req, res, next) => {
-  // Se a requisição for para a API e não bateu em nenhuma rota acima, retorna JSON, não HTML
-  if (req.originalUrl.startsWith('/api')) {
-    return res.status(404).json({ error: 'Rota da API não encontrada.' });
-  }
-  res.status(404).send('Página não encontrada.');
-});
-
-// ==========================================
-// 6. INICIALIZAÇÃO
+// 5. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
