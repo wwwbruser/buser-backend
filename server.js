@@ -15,7 +15,7 @@ try {
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://tela-buser-default-rtdb.firebaseio.com" // Se o seu banco não for esse, altere aqui!
+    databaseURL: "https://tela-buser-default-rtdb.firebaseio.com"
   });
   
   console.log("✅ Firebase conectado com sucesso!");
@@ -29,32 +29,29 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.use(cors({
-  origin: 'https://wwwbruser.github.io'
-}));
+// Libera o acesso de qualquer site (para não dar erro de CORS)
+app.use(cors());
 app.use(express.json());
 
-// Rota raiz (para testes rápidos)
+// Rota raiz (para testes)
 app.get('/', (req, res) => {
   res.send('Servidor Buser está rodando!');
 });
 
 // ==========================================
-// 3. ROTA QUE O SITE ESTÁ PEDINDO
+// 3. ROTA DE BUSCA (O site pede essa)
 // ==========================================
-app.get('/api/clicksbus/search', async (req, res) => {
+app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
-    // ⚠️ AQUI ENTRA A LÓGICA DO FIREBASE
-    // Por enquanto, retornamos uma lista vazia para o site parar de dar erro 404
-    const viagens = [];
+    // Simulando um ID de pedido para o site começar o monitoramento
+    const pedidoId = "simulacao_" + Date.now();
 
     res.json({
-      sucesso: true,
-      viagens: viagens,
-      mensagem: "Nenhuma passagem encontrada (lista vazia)."
+      pedidoId: pedidoId,
+      mensagem: "Busca iniciada com sucesso."
     });
   } catch (error) {
     console.error("Erro na busca:", error);
@@ -63,7 +60,26 @@ app.get('/api/clicksbus/search', async (req, res) => {
 });
 
 // ==========================================
-// 4. INICIALIZAÇÃO
+// 4. ROTA DE RESULTADO (O site pede essa logo depois)
+// ==========================================
+app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
+  try {
+    // Aqui você colocaria a lógica real de pegar as viagens
+    // Por enquanto, retornamos "concluido" e uma lista vazia para o site não travar
+    
+    res.json({
+      status: 'concluido',
+      data: [], // Lista vazia significa "Nenhuma passagem encontrada" no frontend
+      mensagem: "Nenhuma passagem encontrada."
+    });
+  } catch (error) {
+    console.error("Erro no resultado:", error);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// ==========================================
+// 5. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
