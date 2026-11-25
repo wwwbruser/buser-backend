@@ -18,13 +18,13 @@ try {
     credential: admin.credential.cert(serviceAccount),
     databaseURL: "https://tela-buser-default-rtdb.firebaseio.com"
   });
-  console.log("✅ Firebase conectado com sucesso!");
+  console.log("✅ Firebase conectado!");
 } catch (error) {
-  console.error("❌ Erro ao conectar no Firebase:", error.message);
+  console.error("❌ Firebase:", error.message);
 }
 
 // ==========================================
-// 2. SERVIDOR E CORS
+// 2. SERVIDOR
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -43,37 +43,22 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // ==========================================
-// 3. PROXY GTIPROXY
+// 3. PROXY
 // ==========================================
 const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
 // ==========================================
-// 4. DADOS DE FALLBACK (PARA O SITE NUNCA QUEBRAR)
-// ==========================================
-function gerarViagensFallback(origem, destino) {
-  return [
-    {
-      company: { name: "Viação Catedral", logo: "" },
-      bus_type: "Executivo",
-      price: 150.00,
-      departure: { time: "08:00", city: origem, terminal: { name: "Terminal Rodoviário", address: "Centro" } },
-      arrival: { time: "14:30", city: destino, terminal: { name: "Rodoviária Central", address: "Centro" } }
-    },
-    {
-      company: { name: "Expresso do Sul", logo: "" },
-      bus_type: "Convencional",
-      price: 120.50,
-      departure: { time: "10:15", city: origem, terminal: { name: "Terminal Principal", address: "Av. Brasil" } },
-      arrival: { time: "17:00", city: destino, terminal: { name: "Terminal Novo", address: "Av. das Nações" } }
-    }
-  ];
-}
-
-// ==========================================
-// 5. ROTAS
+// 4. ROTAS E CACHE
 // ==========================================
 const cacheViagens = {};
+
+function gerarViagensFallback(origem, destino) {
+  return [
+    { company: { name: "Viação Catedral", logo: "" }, bus_type: "Executivo", price: 150.00, departure: { time: "08:00", city: origem, terminal: { name: "Terminal Rodoviário", address: "Centro" } }, arrival: { time: "14:30", city: destino, terminal: { name: "Rodoviária Central", address: "Centro" } } },
+    { company: { name: "Expresso do Sul", logo: "" }, bus_type: "Convencional", price: 120.50, departure: { time: "10:15", city: origem, terminal: { name: "Terminal Principal", address: "Av. Brasil" } }, arrival: { time: "17:00", city: destino, terminal: { name: "Terminal Novo", address: "Av. das Nações" } } }
+  ];
+}
 
 function criarSlugCidade(cidadeCompleta) {
   if (!cidadeCompleta) return 'sao-paulo-sp-todos';
@@ -85,40 +70,45 @@ function criarSlugCidade(cidadeCompleta) {
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
-    console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
+    console.log(`🔍 Buscando de ${origem} para ${destino} em ${data}`);
 
     const fromSlug = criarSlugCidade(origem);
     const toSlug = criarSlugCidade(destino);
     
-    // ⚠️ COLOQUE AQUI O SEU CLIENT_ID E COOKIE SE TIVER (se não, ele usa o padrão)
+    // ⚠️ COLOQUE AQUI O SEU CLIENT ID E COOKIE (se tiver)
     const CLIENT_ID = 'clickbus-web'; 
-    const COOKIE = 'COLE_SEU_COOKIE_AQUI_SE_TIVER'; // Opcional, mas ajuda muito a burlar o bloqueio
+    const COOKIE = 'COLE_O_COOKIE_GIGANTE_AQUI'; // Se tiver, cole aqui.
 
     const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${CLIENT_ID}`;
 
-    console.log(`⏳ Chamando o ClickBus real via proxy GTIPROXY...`);
+    console.log(`⏳ Chamando o ClickBus com Proxy...`);
     
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
       timeout: 20000,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
         'Origin': 'https://www.clickbus.com.br',
         'Referer': 'https://www.clickbus.com.br/',
-        // Se você tiver o cookie, ele é enviado aqui:
-        ...(COOKIE !== 'COLE_SEU_COOKIE_AQUI_SE_TIVER' ? { 'Cookie': COOKIE } : {})
+        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site',
+        ...(COOKIE !== 'COLE_O_COOKIE_GIGANTE_AQUI' ? { 'Cookie': COOKIE } : {})
       }
     });
 
-    console.log("✅ SUCESSO! Dados reais recebidos do ClickBus.");
+    console.log("✅ SUCESSO! Dados reais recebidos.");
     const pedidoId = "real_" + Date.now();
     cacheViagens[pedidoId] = response.data;
     res.json({ pedidoId: pedidoId });
 
   } catch (error) {
-    console.log(`❌ ClickBus bloqueou (${error.message}). Ativando dados de teste.`);
+    console.log(`❌ Erro no ClickBus (${error.message}). Ativando fallback.`);
     const pedidoId = "fake_" + Date.now();
     cacheViagens[pedidoId] = gerarViagensFallback(req.query.origem, req.query.destino);
     res.json({ pedidoId: pedidoId });
@@ -126,27 +116,13 @@ app.get('/api/clickbus/search', async (req, res) => {
 });
 
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
-  try {
-    const { pedidoId } = req.params;
-    const dados = cacheViagens[pedidoId];
-    if (!dados) return res.json({ status: 'processando' });
-
-    res.json({
-      status: 'concluido',
-      data: dados.trips || dados.viagens || dados.data || dados.results || dados || [], 
-      mensagem: "Busca concluída."
-    });
-    delete cacheViagens[pedidoId];
-  } catch (error) {
-    res.status(500).json({ error: 'Erro interno' });
-  }
+  const { pedidoId } = req.params;
+  const dados = cacheViagens[pedidoId];
+  if (!dados) return res.json({ status: 'processando' });
+  res.json({ status: 'concluido', data: dados.trips || dados.viagens || dados.data || dados.results || dados || [], mensagem: "OK" });
+  delete cacheViagens[pedidoId];
 });
 
 app.get('/', (req, res) => res.send('Servidor Buser OK!'));
 
-// ==========================================
-// 6. INICIALIZAÇÃO
-// ==========================================
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Porta ${PORT}`));
