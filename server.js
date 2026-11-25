@@ -55,7 +55,26 @@ const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
 // ==========================================
-// 4. ROTA DE BUSCA
+// 4. FUNÇÃO AUXILIAR PARA CRIAR O "SLUG" DA CIDADE
+// ==========================================
+// Transforma "São Paulo, SP" em "sao-paulo-sp-todos"
+function criarSlugCidade(cidadeCompleta) {
+  if (!cidadeCompleta) return '';
+  // Separa o nome da cidade e o estado (ex: "São Paulo" e "SP")
+  const [cidade, estado] = cidadeCompleta.split(',').map(s => s.trim());
+  
+  // Remove acentos e caracteres especiais, converte para minúsculas e troca espaços por hífen
+  const cidadeSlug = cidade
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '-');
+    
+  return `${cidadeSlug}-${estado.toLowerCase()}-todos`;
+}
+
+// ==========================================
+// 5. ROTA DE BUSCA
 // ==========================================
 const cacheViagens = {};
 
@@ -64,14 +83,23 @@ app.get('/api/clickbus/search', async (req, res) => {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens REAIS de ${origem} para ${destino} na data ${data}`);
 
-    // URL CORRIGIDA DO CLICKBUS (v4)
-    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${encodeURIComponent(origem)}&to=${encodeURIComponent(destino)}&departure_date=${data}`;
+    // Cria os slugs para a API do ClickBus
+    const fromSlug = criarSlugCidade(origem);
+    const toSlug = criarSlugCidade(destino);
+
+    // ⚠️ O clientId é um identificador que o ClickBus usa. 
+    // Se este não funcionar, você precisará capturá-lo no site do ClickBus (F12 -> Network -> procure por clientId na URL).
+    const clientId = 'clickbus-web'; 
+
+    // URL CORRIGIDA COM TODOS OS PARÂMETROS EXIGIDOS
+    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${clientId}`;
 
     console.log(`⏳ Chamando o ClickBus através do Proxy GTIPROXY...`);
+    console.log(`🔗 URL: ${urlClickbus}`);
     
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
-      timeout: 25000, // 25 segundos de limite
+      timeout: 25000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*'
@@ -81,7 +109,6 @@ app.get('/api/clickbus/search', async (req, res) => {
     const dadosReais = response.data;
     console.log("✅ Dados recebidos com sucesso do Proxy!");
 
-    // Se o ClickBus retornar HTML (bloqueio do Cloudflare), avisamos
     if (typeof dadosReais === 'string' && dadosReais.includes('<!DOCTYPE html>')) {
         throw new Error("O ClickBus retornou HTML (provavelmente bloqueou o proxy).");
     }
@@ -96,7 +123,6 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     if (error.response) {
-        // O servidor respondeu com um status fora do range 2xx
         console.error(`❌ Erro do ClickBus: Status ${error.response.status} - ${JSON.stringify(error.response.data)}`);
     } else {
         console.error("❌ Erro na busca real:", error.message);
@@ -106,7 +132,7 @@ app.get('/api/clickbus/search', async (req, res) => {
 });
 
 // ==========================================
-// 5. ROTA DE RESULTADO
+// 6. ROTA DE RESULTADO
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
@@ -119,7 +145,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 
     res.json({
       status: 'concluido',
-      data: dadosDaViagem.trips || dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || dadosDaViagem, 
+      data: dadosDaViagem.trips || dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || [], 
       mensagem: "Busca concluída."
     });
 
@@ -132,7 +158,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ==========================================
-// 6. INICIALIZAÇÃO
+// 7. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
