@@ -29,42 +29,39 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuração explícita do CORS para permitir o seu front-end
-const corsOptions = {
+// Libera o acesso explícito para o seu front-end e ambientes locais
+app.use(cors({
   origin: [
-    'https://www.bruser.github.io', 
+    'https://www.bruser.github.io',
     'https://bruser.github.io',
     'http://localhost:3000',
-    'http://127.0.0.1:5500' // Caso você use o Live Server no VSCode
+    'http://127.0.0.1:5500'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-};
-app.use(cors(corsOptions));
+}));
+
+// Permite que o Express entenda JSON no corpo das requisições
 app.use(express.json());
 
-// Middleware para logar todas as requisições que chegam no servidor
+// Middleware para logar no Render todas as requisições que chegam
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] Recebida requisição: ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] Requisição recebida: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'Desconhecida'}`);
   next();
 });
 
 // Rota raiz (para testes)
 app.get('/', (req, res) => {
-  res.send('Servidor Buser está rodando perfeitamente!');
+  res.send('Servidor Buser está rodando!');
 });
 
 // ==========================================
-// 3. ROTA DE BUSCA
+// 3. ROTA DE BUSCA (O site pede essa)
 // ==========================================
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
-
-    if (!origem || !destino || !data) {
-      return res.status(400).json({ error: 'Faltando parâmetros: origem, destino ou data.' });
-    }
 
     // Simulando um ID de pedido para o site começar o monitoramento
     const pedidoId = "simulacao_" + Date.now();
@@ -75,13 +72,12 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
   } catch (error) {
     console.error("Erro na busca:", error);
-    // Importante retornar JSON no erro para o front-end não quebrar
-    res.status(500).json({ error: 'Erro interno no servidor ao processar a busca.' });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // ==========================================
-// 4. ROTA DE RESULTADO
+// 4. ROTA DE RESULTADO (O site pede essa logo depois)
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
@@ -95,12 +91,23 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
     });
   } catch (error) {
     console.error("Erro no resultado:", error);
-    res.status(500).json({ error: 'Erro interno no servidor ao buscar resultados.' });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // ==========================================
-// 5. INICIALIZAÇÃO
+// 5. TRATAMENTO DE ROTAS NÃO ENCONTRADAS (Evita erro de HTML)
+// ==========================================
+app.use((req, res, next) => {
+  // Se a requisição for para a API e não bateu em nenhuma rota acima, retorna JSON, não HTML
+  if (req.originalUrl.startsWith('/api')) {
+    return res.status(404).json({ error: 'Rota da API não encontrada.' });
+  }
+  res.status(404).send('Página não encontrada.');
+});
+
+// ==========================================
+// 6. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
