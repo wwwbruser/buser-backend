@@ -1,5 +1,7 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const axios = require('axios');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // ==========================================
 // 1. CONFIGURAÇÃO DO FIREBASE
@@ -28,7 +30,6 @@ try {
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Middleware de CORS DEFINITIVO
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -37,56 +38,58 @@ app.use((req, res, next) => {
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
 app.use(express.json());
 
-// Middleware de log para monitorar no Render
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] Requisição: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'N/A'}`);
-  next();
-});
-
-// Rota raiz para testes
 app.get('/', (req, res) => {
   res.send('Servidor Buser está rodando perfeitamente!');
 });
 
 // ==========================================
-// 3. ROTA DE BUSCA (COM PROXY)
+// 3. CONFIGURAÇÃO DO PROXY GTIPROXY
+// ==========================================
+// Aqui estão as suas credenciais. O Axios vai usar isso para rotear a conexão.
+const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
+const proxyAgent = new HttpsProxyAgent(proxyUrl);
+
+// ==========================================
+// 4. ROTA DE BUSCA
 // ==========================================
 const cacheViagens = {};
 
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
-    console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
+    console.log(`🔍 Buscando viagens REAIS de ${origem} para ${destino} na data ${data}`);
 
-    // ⚠️ SUBSTITUA PELA URL REAL DA API DO CLICKBUS
+    // ---------------------------------------------------------
+    // ⚠️ ATENÇÃO: VOCÊ PRECISA DESCOBRIR A URL REAL DO CLICKBUS
+    // Abaixo está um exemplo. Se você não trocar por uma URL válida que devolva JSON, vai dar erro.
+    // ---------------------------------------------------------
     const urlClickbus = `https://www.clickbus.com.br/api/v1/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
 
-    // ⚠️ SUBSTITUA PELA URL DO SEU PROXY
-    // Se for ScraperAPI: http://api.scraperapi.com?api_key=SUA_CHAVE&url=${encodeURIComponent(urlClickbus)}
-    const proxyUrl = `https://seu-proxy-aqui.com/?url=${encodeURIComponent(urlClickbus)}`;
-
-    console.log(`⏳ Chamando o Proxy...`);
+    console.log(`⏳ Chamando o ClickBus através do Proxy GTIPROXY...`);
     
-    const response = await fetch(proxyUrl, {
+    // Faz a requisição usando o Axios + o Proxy Agent
+    const response = await axios.get(urlClickbus, {
+      httpsAgent: proxyAgent,
+      timeout: 20000, // 20 segundos de limite
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
       }
     });
 
-    if (!response.ok) {
-      throw new Error(`Proxy/ClickBus retornou erro: ${response.status}`);
-    }
+    const dadosReais = response.data;
+    console.log("✅ Dados recebidos com sucesso do Proxy!");
 
-    const dadosReais = await response.json();
-    console.log("✅ Dados recebidos com sucesso!");
+    // Verifica se o que voltou é realmente um JSON (e não uma página de erro HTML)
+    if (typeof dadosReais === 'string' && dadosReais.includes('<!DOCTYPE html>')) {
+        throw new Error("O ClickBus retornou HTML (provavelmente bloqueou o proxy).");
+    }
     
     const pedidoId = "real_" + Date.now();
     cacheViagens[pedidoId] = dadosReais;
@@ -98,12 +101,12 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     console.error("❌ Erro na busca real:", error.message);
-    res.status(500).json({ error: 'Erro ao buscar no ClickBus.' });
+    res.status(500).json({ error: 'Erro ao buscar no ClickBus. Verifique os logs.' });
   }
 });
 
 // ==========================================
-// 4. ROTA DE RESULTADO
+// 5. ROTA DE RESULTADO
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
@@ -116,7 +119,8 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 
     res.json({
       status: 'concluido',
-      data: dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || [], 
+      // Ajuste o caminho abaixo dependendo de como o ClickBus devolve o JSON
+      data: dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || dadosDaViagem, 
       mensagem: "Busca concluída."
     });
 
@@ -129,7 +133,7 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
 });
 
 // ==========================================
-// 5. INICIALIZAÇÃO
+// 6. INICIALIZAÇÃO
 // ==========================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
