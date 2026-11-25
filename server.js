@@ -18,12 +18,14 @@ try {
     credential: admin.credential.cert(serviceAccount),
     databaseURL: "https://tela-buser-default-rtdb.firebaseio.com"
   });
+  
+  console.log("✅ Firebase conectado com sucesso!");
 } catch (error) {
-  console.log("Aviso Firebase:", error.message);
+  console.error("❌ Erro ao conectar no Firebase:", error.message);
 }
 
 // ==========================================
-// 2. SERVIDOR E CORS
+// 2. CONFIGURAÇÃO DO SERVIDOR E CORS
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -43,15 +45,15 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // ==========================================
-// 3. PROXY GTIPROXY
+// 3. CONFIGURAÇÃO DO PROXY GTIPROXY
 // ==========================================
 const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
 // ==========================================
-// 4. FUNÇÃO PARA CRIAR DADOS FALSOS (Caso o ClickBus bloqueie)
+// 4. FUNÇÃO PARA GERAR DADOS DE TESTE (FALLBACK)
 // ==========================================
-function gerarViagensFake(origem, destino) {
+function gerarViagensFallback(origem, destino) {
   return [
     {
       company: { name: "Viação Catedral", logo: "" },
@@ -100,12 +102,12 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${encodeURIComponent(clientId)}`;
 
-    console.log(`⏳ Tentando buscar no ClickBus real via proxy...`);
+    console.log(`⏳ Chamando o ClickBus real via proxy GTIPROXY...`);
     
     // Tenta buscar no ClickBus real
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
-      timeout: 15000,
+      timeout: 20000, // Aumentado para 20s
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json'
@@ -120,12 +122,11 @@ app.get('/api/clickbus/search', async (req, res) => {
     res.json({ pedidoId: pedidoId });
 
   } catch (error) {
-    // SE DER ERRO (Bloqueio, 500, etc), ELE USA OS DADOS FAKE PARA O SITE NÃO QUEBRAR
+    // SE DER ERRO (Bloqueio, 500, etc), ELE USA OS DADOS DE TESTE PARA O SITE NÃO QUEBRAR
     console.log(`❌ ClickBus bloqueou ou deu erro (${error.message}). Ativando dados de teste para não quebrar o site.`);
     
     const pedidoId = "fake_" + Date.now();
-    // Gera viagens de mentira para o seu site mostrar os cards bonitinhos
-    cacheViagens[pedidoId] = gerarViagensFake(req.query.origem, req.query.destino);
+    cacheViagens[pedidoId] = gerarViagensFallback(req.query.origem, req.query.destino);
 
     res.json({ pedidoId: pedidoId });
   }
