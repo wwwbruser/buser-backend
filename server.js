@@ -43,9 +43,10 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // ==========================================
-// 3. PROXY
+// 3. PROXY (Agora lendo do Render)
 // ==========================================
-const proxyUrl = 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
+// Pega a URL do proxy das variáveis de ambiente do Render, ou usa a padrão como fallback
+const proxyUrl = process.env.PROXY_URL || 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
 const proxyAgent = new HttpsProxyAgent(proxyUrl);
 
 // ==========================================
@@ -75,13 +76,15 @@ app.get('/api/clickbus/search', async (req, res) => {
     const fromSlug = criarSlugCidade(origem);
     const toSlug = criarSlugCidade(destino);
     
-    // ⚠️ COLOQUE AQUI O SEU CLIENT ID E COOKIE (se tiver)
-    const CLIENT_ID = 'clickbus-web'; 
-    const COOKIE = 'COLE_O_COOKIE_GIGANTE_AQUI'; // Se tiver, cole aqui.
+    // ⚠️ MUDANÇAS AQUI: ClientID para 3 e URL para bff v6
+    const CLIENT_ID = '3'; 
+    
+    // ⚠️ SE VOCÊ PEGOU O COOKIE, COLE ELE AQUI EMBAIXO:
+    const COOKIE = 'COLE_O_COOKIE_GIGANTE_AQUI'; 
 
-    const urlClickbus = `https://api.clickbus.com/api/v4/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${CLIENT_ID}`;
+    const urlClickbus = `https://bff.clickbus.com/web/api/v6/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${CLIENT_ID}`;
 
-    console.log(`⏳ Chamando o ClickBus com Proxy...`);
+    console.log(`⏳ Chamando o ClickBus (BFF v6) com Proxy...`);
     
     const response = await axios.get(urlClickbus, {
       httpsAgent: proxyAgent,
@@ -109,6 +112,7 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     console.log(`❌ Erro no ClickBus (${error.message}). Ativando fallback.`);
+    // Se der erro 500 ou 404, ele cai aqui e mostra as viagens falsas
     const pedidoId = "fake_" + Date.now();
     cacheViagens[pedidoId] = gerarViagensFallback(req.query.origem, req.query.destino);
     res.json({ pedidoId: pedidoId });
@@ -119,6 +123,8 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   const { pedidoId } = req.params;
   const dados = cacheViagens[pedidoId];
   if (!dados) return res.json({ status: 'processando' });
+  
+  // A BFF v6 pode retornar os dados em um formato diferente, mas geralmente fica em .data ou .trips
   res.json({ status: 'concluido', data: dados.trips || dados.viagens || dados.data || dados.results || dados || [], mensagem: "OK" });
   delete cacheViagens[pedidoId];
 });
