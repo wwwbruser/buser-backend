@@ -42,7 +42,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // ==========================================
-// 3. CONFIGURAÇÃO DA GECKOAPI (Lendo do Render)
+// 3. CONFIGURAÇÃO DA GECKOAPI
 // ==========================================
 const GECKO_API_KEY = process.env.GECKO_API_KEY;
 
@@ -62,12 +62,29 @@ function gerarViagensFallback(origem, destino) {
   ];
 }
 
+// ==========================================
+// FUNÇÃO PARA GERAR POLTRONAS OCUPADAS (35%)
+// ==========================================
+function gerarPoltronasOcupadas(totalPoltronas = 46) {
+    const qtdOcupadas = Math.floor(totalPoltronas * 0.35);
+    const ocupadas = new Set();
+    
+    while (ocupadas.size < qtdOcupadas) {
+        const numero = Math.floor(Math.random() * totalPoltronas) + 1;
+        ocupadas.add(numero);
+    }
+    
+    return Array.from(ocupadas);
+}
+
+// ==========================================
+// ROTA DE BUSCA (GeckoAPI)
+// ==========================================
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
     console.log(`🔍 Buscando de ${origem} para ${destino} em ${data} via GeckoAPI`);
 
-    // A GeckoAPI precisa que a cidade e o estado venham separados.
     const [origemCidade, origemEstado] = origem.split(',').map(s => s.trim());
     const [destinoCidade, destinoEstado] = destino.split(',').map(s => s.trim());
 
@@ -75,7 +92,6 @@ app.get('/api/clickbus/search', async (req, res) => {
         throw new Error("Formato de cidade inválido. Use 'Cidade, UF'.");
     }
 
-    // Monta o corpo da requisição para a GeckoAPI
     const payload = {
       target: "clickbus.com.br",
       type: "plp",
@@ -88,28 +104,38 @@ app.get('/api/clickbus/search', async (req, res) => {
 
     console.log(`⏳ Chamando a GeckoAPI...`);
     
-    // Faz a chamada POST para a GeckoAPI
     const response = await axios.post('https://api.geckoapi.com.br/v1/extract', payload, {
       headers: {
         'Authorization': `Bearer ${GECKO_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 45000 // Timeout de 45s, pois a GeckoAPI processa a página em tempo real
+      timeout: 45000
     });
 
     console.log("✅ SUCESSO! Dados reais recebidos da GeckoAPI.");
     
-    // A GeckoAPI retorna os dados em response.data.data.items
-    const viagens = response.data.data?.items || [];
+    let viagens = response.data.data?.items || [];
+
+    // ==========================================
+    // INJETANDO AS POLTRONAS OCUPADAS (35%)
+    // ==========================================
+    viagens = viagens.map(viagem => {
+        const total = viagem.total_seats || 46; 
+        const ocupadas = gerarPoltronasOcupadas(total);
+        
+        return {
+            ...viagem,
+            occupied_seats: ocupadas,
+            total_seats: total
+        };
+    });
 
     const pedidoId = "real_" + Date.now();
-    cacheViagens[pedidoId] = viagens; // Salva no cache
+    cacheViagens[pedidoId] = viagens; 
     res.json({ pedidoId: pedidoId });
 
   } catch (error) {
     console.error(`❌ Erro na GeckoAPI:`, error.response?.data || error.message);
-    
-    // Se a GeckoAPI falhar (ex: sem créditos, erro na chave), ativa o fallback
     console.log(`Ativando fallback.`);
     const pedidoId = "fake_" + Date.now();
     cacheViagens[pedidoId] = gerarViagensFallback(req.query.origem, req.query.destino);
@@ -117,16 +143,18 @@ app.get('/api/clickbus/search', async (req, res) => {
   }
 });
 
+// ==========================================
+// ROTA DE RESULTADO
+// ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   const { pedidoId } = req.params;
   const dados = cacheViagens[pedidoId];
   if (!dados) return res.json({ status: 'processando' });
   
-  // Retorna os dados limpos (a GeckoAPI já traz no formato que o front espera)
   res.json({ status: 'concluido', data: dados, mensagem: "OK" });
   delete cacheViagens[pedidoId];
 });
 
-app.get('/', (req, res) => res.send('Servidor Buser OK - GeckoAPI'));
+app.get('/', (req, res) => res.send('Servidor Buser OK - GeckoAPI com Poltronas'));
 
 app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Rodando na porta ${PORT}`));
