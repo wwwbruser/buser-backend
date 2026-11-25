@@ -1,7 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
 const axios = require('axios');
-const { HttpsProxyAgent } = require('https-proxy-agent');
 
 // ==========================================
 // 1. CONFIGURAÇÃO DO FIREBASE
@@ -43,11 +42,13 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // ==========================================
-// 3. PROXY (Agora lendo do Render)
+// 3. CONFIGURAÇÃO DA GECKOAPI (Lendo do Render)
 // ==========================================
-// Pega a URL do proxy das variáveis de ambiente do Render, ou usa a padrão como fallback
-const proxyUrl = process.env.PROXY_URL || 'http://gtiba6fce988c:3669c16d34ef@srv.gtiproxy.com:8056';
-const proxyAgent = new HttpsProxyAgent(proxyUrl);
+const GECKO_API_KEY = process.env.GECKO_API_KEY;
+
+if (!GECKO_API_KEY) {
+    console.error("⚠️ ATENÇÃO: A variável GECKO_API_KEY não foi encontrada no Render!");
+}
 
 // ==========================================
 // 4. ROTAS E CACHE
@@ -61,58 +62,55 @@ function gerarViagensFallback(origem, destino) {
   ];
 }
 
-function criarSlugCidade(cidadeCompleta) {
-  if (!cidadeCompleta) return 'sao-paulo-sp-todos';
-  const [cidade, estado] = cidadeCompleta.split(',').map(s => s.trim());
-  const cidadeSlug = cidade.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, '-');
-  return `${cidadeSlug}-${estado ? estado.toLowerCase() : 'sp'}-todos`;
-}
-
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
-    console.log(`🔍 Buscando de ${origem} para ${destino} em ${data}`);
+    console.log(`🔍 Buscando de ${origem} para ${destino} em ${data} via GeckoAPI`);
 
-    const fromSlug = criarSlugCidade(origem);
-    const toSlug = criarSlugCidade(destino);
-    
-    // ⚠️ MUDANÇAS AQUI: ClientID para 3 e URL para bff v6
-    const CLIENT_ID = '3'; 
-    
-    // ⚠️ SE VOCÊ PEGOU O COOKIE, COLE ELE AQUI EMBAIXO:
-    const COOKIE = 'COLE_O_COOKIE_GIGANTE_AQUI'; 
+    // A GeckoAPI precisa que a cidade e o estado venham separados.
+    const [origemCidade, origemEstado] = origem.split(',').map(s => s.trim());
+    const [destinoCidade, destinoEstado] = destino.split(',').map(s => s.trim());
 
-    const urlClickbus = `https://bff.clickbus.com/web/api/v6/trips?from=${fromSlug}&to=${toSlug}&departureDate=${data}&clientId=${CLIENT_ID}`;
+    if (!origemEstado || !destinoEstado) {
+        throw new Error("Formato de cidade inválido. Use 'Cidade, UF'.");
+    }
 
-    console.log(`⏳ Chamando o ClickBus (BFF v6) com Proxy...`);
+    // Monta o corpo da requisição para a GeckoAPI
+    const payload = {
+      target: "clickbus.com.br",
+      type: "plp",
+      originCity: origemCidade,
+      originState: origemEstado,
+      destinationCity: destinoCidade,
+      destinationState: destinoEstado,
+      departureDate: data
+    };
+
+    console.log(`⏳ Chamando a GeckoAPI...`);
     
-    const response = await axios.get(urlClickbus, {
-      httpsAgent: proxyAgent,
-      timeout: 20000,
+    // Faz a chamada POST para a GeckoAPI
+    const response = await axios.post('https://api.geckoapi.com.br/v1/extract', payload, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-        'Origin': 'https://www.clickbus.com.br',
-        'Referer': 'https://www.clickbus.com.br/',
-        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-site',
-        ...(COOKIE !== 'COLE_O_COOKIE_GIGANTE_AQUI' ? { 'Cookie': COOKIE } : {})
-      }
+        'Authorization': `Bearer ${GECKO_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 45000 // Timeout de 45s, pois a GeckoAPI processa a página em tempo real
     });
 
-    console.log("✅ SUCESSO! Dados reais recebidos.");
+    console.log("✅ SUCESSO! Dados reais recebidos da GeckoAPI.");
+    
+    // A GeckoAPI retorna os dados em response.data.data.items
+    const viagens = response.data.data?.items || [];
+
     const pedidoId = "real_" + Date.now();
-    cacheViagens[pedidoId] = response.data;
+    cacheViagens[pedidoId] = viagens; // Salva no cache
     res.json({ pedidoId: pedidoId });
 
   } catch (error) {
-    console.log(`❌ Erro no ClickBus (${error.message}). Ativando fallback.`);
-    // Se der erro 500 ou 404, ele cai aqui e mostra as viagens falsas
+    console.error(`❌ Erro na GeckoAPI:`, error.response?.data || error.message);
+    
+    // Se a GeckoAPI falhar (ex: sem créditos, erro na chave), ativa o fallback
+    console.log(`Ativando fallback.`);
     const pedidoId = "fake_" + Date.now();
     cacheViagens[pedidoId] = gerarViagensFallback(req.query.origem, req.query.destino);
     res.json({ pedidoId: pedidoId });
@@ -124,11 +122,11 @@ app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   const dados = cacheViagens[pedidoId];
   if (!dados) return res.json({ status: 'processando' });
   
-  // A BFF v6 pode retornar os dados em um formato diferente, mas geralmente fica em .data ou .trips
-  res.json({ status: 'concluido', data: dados.trips || dados.viagens || dados.data || dados.results || dados || [], mensagem: "OK" });
+  // Retorna os dados limpos (a GeckoAPI já traz no formato que o front espera)
+  res.json({ status: 'concluido', data: dados, mensagem: "OK" });
   delete cacheViagens[pedidoId];
 });
 
-app.get('/', (req, res) => res.send('Servidor Buser OK!'));
+app.get('/', (req, res) => res.send('Servidor Buser OK - GeckoAPI'));
 
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Porta ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Rodando na porta ${PORT}`));
