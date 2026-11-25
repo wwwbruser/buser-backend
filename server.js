@@ -1,29 +1,80 @@
-// Variável para guardar o resultado temporariamente (para o front-end buscar)
-const cacheViagens = {};
+const express = require('express');
+const admin = require('firebase-admin');
 
 // ==========================================
-// 3. ROTA DE BUSCA (Agora com o Proxy Real)
+// 1. CONFIGURAÇÃO DO FIREBASE
 // ==========================================
+try {
+  const serviceAccount = {
+    type: "service_account",
+    project_id: "tela-buser", 
+    private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC23mr0rWvK8r53\nuIG0W6AU8ugOH1G3VeJaPY0duB5IHG8VAXBsY9GW/G121KVMmJWJ5qn3wf0qZZ3K\nTWgzyYVD2hu2shd222ucZ37v0rsUQf5YJ/0ExQyhDmZABdoJcjVoBxUSr6KaQAwe\nv7fv1auVE06ylD6B/CYDD2HnKenIxFECJYOFOJHZKGypjMSgxVRz2M0IzFyk80y3\nlEu2lCVy0qjeAveRoPmWoP06gtVVwjcS8mFizHrFr9s8FTmAxDWQlzQGfOgOle4J\npwwZci17eCJU/IFZsDnE1OBxFvi/0fH+M8m1bphE+GOn1dG6WMgltGtU08lCGbwa\ngPmQB0krAgMBAAECggEACTLB3YHVoLU6GGqK96f+Mt+PBZrUsOycgJ6E+SA4QbdQ\nbRWP8pvIwJf855PFpscsCm40UXaMBfRrje/71FMIJYQUjcmCfaOG06yvCWAnsdqp\n8QQ96V4CBx3izcidkYkRn6RvjmuQOcML+QX6uhEc2thIRppHVKF6xf+hlI+ap1MG\n3JpyWTKi65ys5SptwTBjunhZ4QJNTfDffC8yN8RAezhtJMpJp3b3l6NZQA6Et9Rm\n2c3CyvkToHWNahN8m/domkzJNPV+u/zAlDb5ajIeBDNb8r54jD3MibvK3tei1/9c\nrmfb9vvmlurtDCQByCP1v8ee9HAZRU6Zoc/aQKn7jQKBgQDc9nRKXDV9eV5IGelh\n1FCZaFUrj38O8WszEhSTsGvhqmVQt6PVo+aMkEo3/H+2fiWqZNDIhvQRE2IA4gNj\nBMP8/EnUWl7pXNGeuLgS15HMJszuHtRcRP1l36KLBXeHQccgxrjYMfvBI4SGm7nP\nNnQuHWVbFpuuKh5mIYMHZLLx3wKBgQDT3Z33wsa65InrQwDaidBpl65QzEP/wKRf\nnKuuUdZk1B8xJhD5VSjP/erpeiM19RLPD9r1pF5nev9jpDO4oOMYBjw/5CG/DhCG\nsF8GNokxRkXZOh+oTnzzOlK1gwlG4vFovumxpt8DLUtUIYAALIwyTSmxEYXTTlo9\nIPyyzIeKNQKBgQDK0tsKCrv60fZOHqLQbvAQ8OkFFDHgCJCLD3Sd4JoWSa+4OOkF\nSO5uZmAKJhcg74gpcWMIPoA4UF9sSgor0QsJ5JbseouWj+HGXO5yNTgaeh8wEFKD\n47vp0C7Gh50hJargFilEIhViQvT6DmWvo99fGRKZWxZJ91VyEB7TIYb0ZwKBgF2M\nu9XM0Ydwpl2VZmkY9UfKzBOtPlFNtMbrHPuJ80ruRx+imVge/Dhq/DE/1xBaOIXp\nkFtqyqySqPZMaPIbSGsxRaVIjIYaJb3zXuIVbpqtVuZGPfhJP+7+T8sKIyyDxOjl\nc7cX4d07QMnTSPvKr9T+MWyYOilFrZ7UVAB3Q1oJAoGAKqTNbBGQrlhHWeA5jC1g\nUlRclvgLsa+ihBSv6AO8h3E0BUjac74islXLETBbG2Bv8BwBq1bnqrf2b4urUElX\niVESXxIbqSDq8NWgZIGtuKu2riPEU5qfpuOtVMGeechP4VrC6zZFQCQaAFjmp8oL\nrgXfZT1D+b32Q6fLENhXmBg=\n-----END PRIVATE KEY-----\n",
+    client_email: "firebase-adminsdk-fbsvc@tela-buser.iam.gserviceaccount.com" 
+  };
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://tela-buser-default-rtdb.firebaseio.com"
+  });
+  
+  console.log("✅ Firebase conectado com sucesso!");
+} catch (error) {
+  console.error("❌ Erro ao conectar no Firebase:", error.message);
+}
+
+// ==========================================
+// 2. CONFIGURAÇÃO DO SERVIDOR E CORS
+// ==========================================
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Middleware de CORS DEFINITIVO
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(express.json());
+
+// Middleware de log para monitorar no Render
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] Requisição: ${req.method} ${req.url} | Origem: ${req.headers.origin || 'N/A'}`);
+  next();
+});
+
+// Rota raiz para testes
+app.get('/', (req, res) => {
+  res.send('Servidor Buser está rodando perfeitamente!');
+});
+
+// ==========================================
+// 3. ROTA DE BUSCA (COM PROXY)
+// ==========================================
+const cacheViagens = {};
+
 app.get('/api/clickbus/search', async (req, res) => {
   try {
     const { origem, destino, data } = req.query;
-    console.log(`🔍 Buscando viagens REAIS de ${origem} para ${destino} na data ${data}`);
+    console.log(`🔍 Buscando viagens de ${origem} para ${destino} na data ${data}`);
 
-    // ⚠️ ATENÇÃO: Substitua essa URL pela URL REAL da API do ClickBus
-    // Você precisa descobrir isso olhando a aba Network (F12) do site do ClickBus.
+    // ⚠️ SUBSTITUA PELA URL REAL DA API DO CLICKBUS
     const urlClickbus = `https://www.clickbus.com.br/api/v1/search?origem=${encodeURIComponent(origem)}&destino=${encodeURIComponent(destino)}&data=${data}`;
 
-    // ⚠️ AQUI ENTRA O SEU PROXY
-    // Se você configurou no Render como variável de ambiente, use process.env.NOME_DA_VARIAVEL
-    // Exemplo com ScraperAPI: 
-    // const proxyUrl = `http://api.scraperapi.com?api_key=${process.env.SCRAPER_API_KEY}&url=${encodeURIComponent(urlClickbus)}`;
-    
-    // Ou se o seu proxy recebe a URL direto:
+    // ⚠️ SUBSTITUA PELA URL DO SEU PROXY
+    // Se for ScraperAPI: http://api.scraperapi.com?api_key=SUA_CHAVE&url=${encodeURIComponent(urlClickbus)}
     const proxyUrl = `https://seu-proxy-aqui.com/?url=${encodeURIComponent(urlClickbus)}`;
 
-    console.log(`⏳ Chamando o Proxy: ${proxyUrl}`);
+    console.log(`⏳ Chamando o Proxy...`);
     
-    // O Render faz a requisição para o Proxy (e o proxy para o ClickBus)
     const response = await fetch(proxyUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -31,18 +82,15 @@ app.get('/api/clickbus/search', async (req, res) => {
     });
 
     if (!response.ok) {
-      throw new Error(`O Proxy ou o ClickBus retornou erro: ${response.status}`);
+      throw new Error(`Proxy/ClickBus retornou erro: ${response.status}`);
     }
 
-    // Pega os dados reais (JSON)
     const dadosReais = await response.json();
     console.log("✅ Dados recebidos com sucesso!");
     
-    // Gera um ID e guarda os dados no cache
     const pedidoId = "real_" + Date.now();
     cacheViagens[pedidoId] = dadosReais;
 
-    // Devolve o ID para o front-end começar a consultar
     res.json({
       pedidoId: pedidoId,
       mensagem: "Busca real iniciada."
@@ -50,39 +98,39 @@ app.get('/api/clickbus/search', async (req, res) => {
 
   } catch (error) {
     console.error("❌ Erro na busca real:", error.message);
-    res.status(500).json({ error: 'Erro ao buscar no ClickBus. Verifique os logs do Render.' });
+    res.status(500).json({ error: 'Erro ao buscar no ClickBus.' });
   }
 });
 
 // ==========================================
-// 4. ROTA DE RESULTADO (Entrega os dados reais para o site)
+// 4. ROTA DE RESULTADO
 // ==========================================
 app.get('/api/clickbus/resultado/:pedidoId', async (req, res) => {
   try {
     const { pedidoId } = req.params;
-    
-    // Pega os dados que guardamos no cache
     const dadosDaViagem = cacheViagens[pedidoId];
 
     if (!dadosDaViagem) {
-       // Se não achou, avisa o front-end que ainda está processando
        return res.json({ status: 'processando' });
     }
 
-    // Devolve os dados para o front-end
-    // ⚠️ Dependendo de como o ClickBus devolve, a lista pode estar em .data, .viagens, .trips, etc.
-    // Você vai precisar olhar o log do Render para ver como o JSON chegou.
     res.json({
       status: 'concluido',
       data: dadosDaViagem.viagens || dadosDaViagem.data || dadosDaViagem.results || [], 
       mensagem: "Busca concluída."
     });
 
-    // Limpa o cache para não encher a memória do Render
     delete cacheViagens[pedidoId];
 
   } catch (error) {
     console.error("Erro no resultado:", error);
     res.status(500).json({ error: 'Erro interno' });
   }
+});
+
+// ==========================================
+// 5. INICIALIZAÇÃO
+// ==========================================
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
